@@ -18,7 +18,7 @@ public class SimulationController : MonoBehaviour
 
     private void Awake()
     {
-        grid = FindObjectOfType<GridManager>();
+        grid = Object.FindFirstObjectByType<GridManager>();
         if (grid == null || grid.config == null)
         {
             Debug.LogError("SimulationController: add a GridManager in the scene and assign a GridConfig.");

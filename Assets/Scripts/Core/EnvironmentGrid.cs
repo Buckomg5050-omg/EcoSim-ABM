@@ -24,7 +24,7 @@ public class EnvironmentGrid : MonoBehaviour
 
     void Awake()
     {
-        if (grid == null) grid = FindObjectOfType<GridManager>();
+        if (grid == null) grid = Object.FindFirstObjectByType<GridManager>();
         TryBuildInitial();
     }
 
@@ -33,7 +33,7 @@ public class EnvironmentGrid : MonoBehaviour
     {
         // Refresh preview in editor when values change
         if (Application.isPlaying) return;
-        if (grid == null) grid = FindObjectOfType<GridManager>();
+        if (grid == null) grid = Object.FindFirstObjectByType<GridManager>();
         TryBuildInitial();
     }
 #endif
