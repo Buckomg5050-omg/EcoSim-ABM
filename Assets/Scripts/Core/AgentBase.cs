@@ -13,14 +13,26 @@ public abstract class AgentBase : MonoBehaviour
     [Min(0f)] public float startEnergy = 5f;
     [Min(0f)] public float metabolismPerTick = 0.2f;
 
+    // --- Runtime energy state ---
     private float bodyEnergy;
     public float Energy => bodyEnergy;
     public bool IsDead { get; private set; }
 
     public Vector2Int GridPos { get; private set; }
 
-    // NEW: public getter to expose the grid
+    // Expose grid for helpers like AgentIO
     public GridManager Grid => grid;
+
+    // --- Rewards (read-only at runtime) ---
+    [Header("Reward (read-only at runtime)")]
+    [SerializeField] private float lastReward;
+    [SerializeField] private float cumulativeReward;
+
+    public float LastReward => lastReward;
+    public float CumulativeReward => cumulativeReward;
+
+    // Track how much we harvested this step (optional)
+    protected float lastGained;
 
     // env is optional; if null we'll find one in the scene
     public virtual void Initialize(GridManager grid, System.Random rng, Vector2Int? start = null, EnvironmentGrid env = null)
@@ -35,6 +47,11 @@ public abstract class AgentBase : MonoBehaviour
 
         bodyEnergy = Mathf.Clamp(startEnergy, 0f, maxEnergy);
         IsDead = false;
+
+        // Rewards/reset
+        lastReward = 0f;
+        cumulativeReward = 0f;
+        lastGained = 0f;
     }
 
     public abstract void Step();
@@ -48,7 +65,15 @@ public abstract class AgentBase : MonoBehaviour
 
     // --- Environment helpers ---
     protected float SenseEnergy(Vector2Int pos) => env ? env.GetEnergy(pos) : 0f;
-    protected float HarvestHere(float amount) => env ? env.Harvest(GridPos, amount) : 0f;
+
+    // Record how much was harvested this step
+    protected float HarvestHere(float amount)
+    {
+        if (!env) return 0f;
+        float take = env.Harvest(GridPos, amount);
+        lastGained = take;
+        return take;
+    }
 
     // --- Energy helpers ---
     protected void GainEnergy(float amount)
@@ -84,9 +109,22 @@ public abstract class AgentBase : MonoBehaviour
         bodyEnergy -= give;
         offspringEnergy = give;
 
-        // clamp parent back within bounds just in case
         bodyEnergy = Mathf.Clamp(bodyEnergy, 0f, maxEnergy);
         return offspringEnergy > 0f;
+    }
+
+    // --- Reward helpers ---
+    public void AddReward(float r)
+    {
+        if (IsDead) return;
+        lastReward += r;
+        cumulativeReward += r;
+    }
+
+    public void ResetStepReward()
+    {
+        lastReward = 0f;
+        lastGained = 0f;
     }
 
     // Neighborhood helper (cardinal + optional center)

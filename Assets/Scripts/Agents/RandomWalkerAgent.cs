@@ -34,6 +34,7 @@ public class RandomWalkerAgent : AgentBase
     {
         // Eat at current cell → adds to body energy
         float gained = HarvestHere(harvestPerStep);
+        AddReward(gained); // positive reward for eating
         GainEnergy(gained);
 
         // Candidate cell list for cell-based policies

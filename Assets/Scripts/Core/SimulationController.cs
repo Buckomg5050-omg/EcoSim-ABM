@@ -32,6 +32,18 @@ public class SimulationController : MonoBehaviour
     [Header("Policy")]
     public PolicyType policy = PolicyType.EpsilonGreedy;
 
+    [Header("Reward")]
+    public float metabolismPenaltyScale = 1f; // reward -= scale * metabolismPerTick
+    public float deathPenalty = 1f;           // applied once on death
+
+    [Header("Episodes")]
+    public bool enableEpisodes = true;
+    [Min(1)] public int maxTicksPerEpisode = 2000;
+    public bool resetWhenAllDead = true;
+    public bool resetWhenMaxTicks = true;
+
+    private int episodeIndex = 0;
+
     private GridManager grid;
     private EnvironmentGrid env;
     private System.Random rng;
@@ -80,6 +92,7 @@ public class SimulationController : MonoBehaviour
             logPathShown = logger.LogPath;
         }
 
+        // Init counters/series
         tick = 0;
         popHistory.Clear();
         RecordPopulation(); // initial sample
@@ -124,6 +137,10 @@ public class SimulationController : MonoBehaviour
 
     private void TickOnce()
     {
+        // Reset per-step rewards
+        for (int i = 0; i < agents.Count; i++)
+            agents[i].ResetStepReward();
+
         // 1) Decision/movement
         for (int i = 0; i < agents.Count; i++)
             agents[i].Step();
@@ -132,11 +149,16 @@ public class SimulationController : MonoBehaviour
         for (int i = 0; i < agents.Count; i++)
             agents[i].ApplyMetabolism();
 
-        // 3) Cull dead
+        // 2b) Metabolism penalty to reward
+        for (int i = 0; i < agents.Count; i++)
+            agents[i].AddReward(-metabolismPenaltyScale * agents[i].metabolismPerTick);
+
+        // 3) Cull dead (apply one-time death penalty)
         for (int i = agents.Count - 1; i >= 0; i--)
         {
             if (agents[i].IsDead)
             {
+                agents[i].AddReward(-deathPenalty);
                 var go = agents[i].gameObject;
                 agents.RemoveAt(i);
                 if (go != null) Destroy(go);
@@ -169,7 +191,23 @@ public class SimulationController : MonoBehaviour
 
         // 6) Bookkeeping
         tick++;
-        RecordPopulation();
+        RecordPopulation(); // sample + CSV + chart mark dirty
+
+        // 7) Episode termination checks
+        if (enableEpisodes)
+        {
+            bool allDead = agents.Count == 0;
+            bool hitMax = tick >= maxTicksPerEpisode;
+
+            if ((resetWhenAllDead && allDead) || (resetWhenMaxTicks && hitMax))
+                ResetEpisode();
+        }
+    }
+
+    private void ResetEpisode()
+    {
+        episodeIndex++;
+        ResetAgents(); // clears tick/history, (re)logging, and respawns
     }
 
     // ---------- Helpers ----------
@@ -224,6 +262,7 @@ public class SimulationController : MonoBehaviour
 
     private void RecordPopulation()
     {
+        // history capped to chartWidth samples
         popHistory.Add(agents.Count);
         if (popHistory.Count > chartWidth) popHistory.RemoveAt(0);
         chartDirty = true;
@@ -282,6 +321,7 @@ public class SimulationController : MonoBehaviour
 
     public void ResetAgents()
     {
+        // Recreate RNG from current seed so spawns are deterministic for that seed
         rng = new System.Random(grid.config.seed);
 
         if (agentsRoot != null) Destroy(agentsRoot.gameObject);
@@ -289,17 +329,19 @@ public class SimulationController : MonoBehaviour
         agentsRoot = null;
         SpawnAgents();
 
+        // Reset counters & chart
         tick = 0;
         popHistory.Clear();
         chartDirty = true;
 
+        // Optionally start a fresh CSV
         if (enableCsvLogging && newLogOnReset)
         {
             logger?.StartNew("run", grid.config.seed, grid.config, logFlushEvery);
             logPathShown = logger.LogPath;
         }
 
-        RecordPopulation();
+        RecordPopulation(); // log initial state
     }
 
     // ---------- Camera helper ----------
@@ -351,6 +393,7 @@ public class SimulationController : MonoBehaviour
         if (!showPopChart) return;
         EnsureChartTexture();
 
+        // Clear background (semi-transparent dark)
         int total = chartPixels.Length;
         for (int i = 0; i < total; i++) chartPixels[i] = new Color32(0, 0, 0, 160);
 
@@ -361,6 +404,7 @@ public class SimulationController : MonoBehaviour
             for (int i = 0; i < count; i++) if (popHistory[i] > maxVal) maxVal = popHistory[i];
             lastWindowMax = maxVal;
 
+            // Plot as columns/resampled
             for (int x = 0; x < chartWidth; x++)
             {
                 int idx = Mathf.RoundToInt(Mathf.Lerp(0, count - 1, (float)x / (chartWidth - 1)));
@@ -372,6 +416,7 @@ public class SimulationController : MonoBehaviour
                 for (int y = pyTop; y < chartHeight; y++)
                 {
                     int ii = y * chartWidth + px;
+                    // lighter for the column, bright white at the tip
                     if (y == pyTop) chartPixels[ii] = new Color32(255, 255, 255, 255);
                     else chartPixels[ii] = new Color32(220, 220, 220, 80);
                 }
@@ -386,8 +431,8 @@ public class SimulationController : MonoBehaviour
     // ---------- Debug UI ----------
     private void OnGUI()
     {
-        GUI.Label(new Rect(10, 10, 740, 24),
-            $"Ticks/sec: {ticksPerSecond:0.0}   Agents: {agents.Count}/{maxAgents}   {(paused ? "Paused" : "Running")} (Space toggles)");
+        GUI.Label(new Rect(10, 10, 860, 24),
+            $"Ep {episodeIndex}  |  Ticks/sec: {ticksPerSecond:0.0}   Agents: {agents.Count}/{maxAgents}   {(paused ? "Paused" : "Running")} (Space toggles)");
 
         if (GUI.Button(new Rect(10, 40, 80, 24), paused ? "Resume" : "Pause"))
             paused = !paused;
@@ -401,6 +446,7 @@ public class SimulationController : MonoBehaviour
         if (GUI.Button(new Rect(280, 40, 80, 24), "Frame"))
             FrameCamera();
 
+        // Readouts
         if (showReadout && env != null)
         {
             if (hasMouseCell)
@@ -415,20 +461,22 @@ public class SimulationController : MonoBehaviour
                 float ea = env.GetEnergy(a0.GridPos);
                 GUI.Label(new Rect(10, 92, 400, 22), $"Agent_000 at {a0.GridPos.x},{a0.GridPos.y}  Cell E: {ea:0.000}");
                 GUI.Label(new Rect(10, 114, 400, 22), $"Agent_000 body energy: {a0.Energy:0.000}");
+                GUI.Label(new Rect(10, 136, 400, 22), $"Agent_000 reward: last {a0.LastReward:0.000}  cum {a0.CumulativeReward:0.000}");
             }
         }
 
+        // Population chart + log path (shifted down to avoid overlap with reward line)
         if (showPopChart)
         {
             if (chartDirty) RebuildChartTexture();
             if (chartTex != null)
             {
-                GUI.Label(new Rect(10, 136, 300, 18), $"Population (window max: {lastWindowMax})");
-                GUI.Box(new Rect(10, 150, chartWidth + 8, chartHeight + 8), GUIContent.none);
-                GUI.DrawTexture(new Rect(14, 154, chartWidth, chartHeight), chartTex);
+                GUI.Label(new Rect(10, 160, 300, 18), $"Population (window max: {lastWindowMax})");
+                GUI.Box(new Rect(10, 174, chartWidth + 8, chartHeight + 8), GUIContent.none);
+                GUI.DrawTexture(new Rect(14, 178, chartWidth, chartHeight), chartTex);
                 if (enableCsvLogging && !string.IsNullOrEmpty(logPathShown))
                 {
-                    GUI.Label(new Rect(14, 154 + chartHeight + 6, 760, 20),
+                    GUI.Label(new Rect(14, 178 + chartHeight + 6, 760, 20),
                         $"Logging → {System.IO.Path.GetFileName(logPathShown)}  (…/persistentDataPath/Logs)");
                 }
             }
