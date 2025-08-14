@@ -6,40 +6,47 @@ public class RandomWalkerAgent : AgentBase
     [Header("Foraging")]
     [Min(0f)] public float harvestPerStep = 0.4f;
 
-    [Header("Decision Policy")]
-    [Range(0f, 1f)] public float exploitProb = 0.85f; // chance to pick best-energy neighbor; else explore randomly
+    [Header("Policy")]
+    public MonoBehaviour policyBehaviour; // should implement IAgentPolicy
+    private IAgentPolicy policy;
 
-    public override void Step()
+    public override void Initialize(GridManager grid, System.Random rng, Vector2Int? start = null, EnvironmentGrid env = null)
     {
-        // Consume some energy at current cell and add to body store
-        float gained = HarvestHere(harvestPerStep);
-        GainEnergy(gained);
+        base.Initialize(grid, rng, start, env);
 
-        // Build candidate moves: stay + 4-cardinal neighbors
-        List<Vector2Int> options = new();
-        foreach (var p in CardinalNeighborhood(includeSelf: true))
-            options.Add(p);
+        // If none assigned in Inspector, attach a default one
+        if (policyBehaviour == null)
+            policyBehaviour = gameObject.AddComponent<EpsilonGreedyEnergyPolicy>();
 
-        Vector2Int chosen = GridPos;
-
-        // With probability exploitProb, choose the neighbor with max energy; otherwise pick random
-        if (rng.NextDouble() < exploitProb)
+        policy = policyBehaviour as IAgentPolicy;
+        if (policy == null)
         {
-            float best = float.NegativeInfinity;
-            for (int i = 0; i < options.Count; i++)
-            {
-                float e = SenseEnergy(options[i]);
-                if (e > best)
-                {
-                    best = e;
-                    chosen = options[i];
-                }
-            }
+            Debug.LogError("Assigned policyBehaviour does not implement IAgentPolicy.");
         }
         else
         {
-            chosen = options[rng.Next(options.Count)];
+            policy.Initialize(this, grid, this.env, this.rng);
         }
+    }
+
+    public override void Step()
+    {
+        // Eat from current cell → convert to body energy
+        float gained = HarvestHere(harvestPerStep);
+        GainEnergy(gained);
+
+        // Candidate moves: stay + 4-cardinal
+        List<Vector2Int> options = new();
+        options.Add(GridPos);
+        var dirs = new[] { Vector2Int.up, Vector2Int.right, Vector2Int.down, Vector2Int.left };
+        for (int i = 0; i < dirs.Length; i++)
+        {
+            var p = GridPos + dirs[i];
+            if (grid.InBounds(p)) options.Add(p);
+        }
+
+        Vector2Int chosen =
+            (policy != null) ? policy.Decide(GridPos, options) : options[rng.Next(options.Count)];
 
         if (chosen != GridPos)
             MoveTo(chosen);
