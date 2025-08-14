@@ -9,6 +9,9 @@ public class RandomWalkerAgent : AgentBase
 
     public override void Step()
     {
+        // Nibble some energy at current cell (visible in gizmos as a small dip)
+        HarvestHere(0.1f);
+
         var d = dirs[rng.Next(dirs.Length)];
         var target = GridPos + d;
 

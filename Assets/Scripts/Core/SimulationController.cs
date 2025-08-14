@@ -11,6 +11,7 @@ public class SimulationController : MonoBehaviour
 
     private GridManager grid;
     private System.Random rng;
+    private EnvironmentGrid env;
     private readonly List<AgentBase> agents = new();
     private Coroutine loop;
     private bool paused;
@@ -25,6 +26,8 @@ public class SimulationController : MonoBehaviour
             enabled = false;
             return;
         }
+
+        env = Object.FindFirstObjectByType<EnvironmentGrid>();
 
         rng = new System.Random(grid.config.seed);
         SpawnAgents();
@@ -69,6 +72,9 @@ public class SimulationController : MonoBehaviour
     {
         for (int i = 0; i < agents.Count; i++)
             agents[i].Step();
+
+        // Environment regrows a bit each tick, capped internally
+        env?.TickRegen();
     }
 
     // ---------- Runtime controls ----------

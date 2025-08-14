@@ -4,17 +4,18 @@ public abstract class AgentBase : MonoBehaviour
 {
     protected GridManager grid;
     protected System.Random rng;
+    protected EnvironmentGrid env;
 
     public Vector2Int GridPos { get; private set; }
 
-    public virtual void Initialize(GridManager grid, System.Random rng, Vector2Int? start = null)
+    // env is optional; if null we'll find one in the scene
+    public virtual void Initialize(GridManager grid, System.Random rng, Vector2Int? start = null, EnvironmentGrid env = null)
     {
         this.grid = grid;
         this.rng = rng;
+        this.env = env ?? Object.FindFirstObjectByType<EnvironmentGrid>();
 
-        // Use deterministic random start unless a position is provided
         GridPos = start ?? grid.RandomCell(rng);
-
         transform.position = grid.GridToWorld(GridPos);
         name = string.IsNullOrEmpty(name) ? GetType().Name : name;
     }
@@ -27,4 +28,8 @@ public abstract class AgentBase : MonoBehaviour
         GridPos = newPos;
         transform.position = grid.GridToWorld(GridPos);
     }
+
+    // --- Simple environment helpers ---
+    protected float SenseEnergy(Vector2Int pos) => env ? env.GetEnergy(pos) : 0f;
+    protected float HarvestHere(float amount) => env ? env.Harvest(GridPos, amount) : 0f;
 }
