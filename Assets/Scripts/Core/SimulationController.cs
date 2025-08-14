@@ -26,6 +26,12 @@ public class SimulationController : MonoBehaviour
     [Range(60, 1024)] public int chartWidth = 320;
     [Range(40, 256)] public int chartHeight = 80;
 
+    // Declare enum WITHOUT a Header attribute (Unity doesn't allow it on enums)
+    public enum PolicyType { EpsilonGreedy, RichnessLinger }
+
+    [Header("Policy")]
+    public PolicyType policy = PolicyType.EpsilonGreedy;
+
     private GridManager grid;
     private EnvironmentGrid env;
     private System.Random rng;
@@ -255,6 +261,19 @@ public class SimulationController : MonoBehaviour
 
         var a = go.AddComponent<RandomWalkerAgent>();
         if (startEnergyOverride.HasValue) a.startEnergy = Mathf.Min(a.maxEnergy, Mathf.Max(0f, startEnergyOverride.Value));
+
+        // Choose and attach policy BEFORE Initialize so the agent uses it
+        MonoBehaviour pol = null;
+        switch (policy)
+        {
+            case PolicyType.EpsilonGreedy:
+                pol = go.AddComponent<EpsilonGreedyEnergyPolicy>();
+                break;
+            case PolicyType.RichnessLinger:
+                pol = go.AddComponent<RichnessLingerPolicy>();
+                break;
+        }
+        a.policyBehaviour = pol;
 
         a.Initialize(grid, rng, startCell, env);
         agents.Add(a);
