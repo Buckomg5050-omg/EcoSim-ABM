@@ -27,7 +27,7 @@ public class SimulationController : MonoBehaviour
     [Range(40, 256)] public int chartHeight = 80;
 
     // Enum (no Header attribute on enums)
-    public enum PolicyType { EpsilonGreedy, RichnessLinger, ObservationGreedy }
+    public enum PolicyType { EpsilonGreedy, RichnessLinger, ObservationGreedy, MLAgents }
 
     [Header("Policy")]
     public PolicyType policy = PolicyType.EpsilonGreedy;
@@ -141,6 +141,15 @@ public class SimulationController : MonoBehaviour
         for (int i = 0; i < agents.Count; i++)
             agents[i].ResetStepReward();
 
+        // ML-Agents hook: request decisions before Steps
+        #if MLAGENTS_PRESENT
+        for (int i = 0; i < agents.Count; i++)
+        {
+            var adapter = agents[i].GetComponent<MLAgentsAdapter>();
+            if (adapter != null) adapter.RequestDecisionTick();
+        }
+        #endif
+
         // 1) Decision/movement
         for (int i = 0; i < agents.Count; i++)
             agents[i].Step();
@@ -164,6 +173,15 @@ public class SimulationController : MonoBehaviour
                 if (go != null) Destroy(go);
             }
         }
+
+        // ML-Agents hook: sync rewards after potential deaths (but before logging)
+        #if MLAGENTS_PRESENT
+        for (int i = 0; i < agents.Count; i++)
+        {
+            var adapter = agents[i].GetComponent<MLAgentsAdapter>();
+            if (adapter != null) adapter.SyncRewardFrom(agents[i]);
+        }
+        #endif
 
         // 4) Reproduction (energy split)
         if (enableReproduction && agents.Count < maxAgents)
@@ -288,16 +306,17 @@ public class SimulationController : MonoBehaviour
         go.transform.SetParent(agentsRoot, worldPositionStays: false);
         go.transform.localScale = Vector3.one * (0.6f * grid.config.cellSize);
 
-        // Deterministic tint by index
+        // Tint
         var rend = go.GetComponent<Renderer>();
         var mat = new Material(rend.sharedMaterial);
         var c = ColorFromIndex(agents.Count);
         if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", c);
-        if (mat.HasProperty("_Color")) mat.SetColor("_Color", c);
+        if (mat.HasProperty("_Color"))     mat.SetColor("_Color", c);
         rend.material = mat;
 
         var a = go.AddComponent<RandomWalkerAgent>();
-        if (startEnergyOverride.HasValue) a.startEnergy = Mathf.Min(a.maxEnergy, Mathf.Max(0f, startEnergyOverride.Value));
+        if (startEnergyOverride.HasValue)
+            a.startEnergy = Mathf.Min(a.maxEnergy, Mathf.Max(0f, startEnergyOverride.Value));
 
         // Choose and attach policy BEFORE Initialize so the agent uses it
         MonoBehaviour pol = null;
@@ -312,9 +331,19 @@ public class SimulationController : MonoBehaviour
             case PolicyType.ObservationGreedy:
                 pol = go.AddComponent<GreedyObsPolicy>();
                 break;
+            case PolicyType.MLAgents:
+            #if MLAGENTS_PRESENT
+                go.AddComponent<MLAgentsAdapter>();            // ML Agent component
+                pol = go.AddComponent<MLAgentsActionPolicy>(); // IActionPolicy that reads adapter's action
+                break;
+            #else
+                Debug.LogWarning("MLAgents not present; falling back to GreedyObsPolicy.");
+                pol = go.AddComponent<GreedyObsPolicy>();
+                break;
+            #endif
         }
-        a.policyBehaviour = pol;
 
+        a.policyBehaviour = pol;
         a.Initialize(grid, rng, startCell, env);
         agents.Add(a);
     }
@@ -465,7 +494,7 @@ public class SimulationController : MonoBehaviour
             }
         }
 
-        // Population chart + log path (shifted down to avoid overlap with reward line)
+        // Population chart + log path
         if (showPopChart)
         {
             if (chartDirty) RebuildChartTexture();
