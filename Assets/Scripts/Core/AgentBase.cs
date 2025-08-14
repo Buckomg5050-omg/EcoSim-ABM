@@ -1,3 +1,4 @@
+// Assets/Scripts/Core/AgentBase.cs
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -62,6 +63,27 @@ public abstract class AgentBase : MonoBehaviour
             bodyEnergy = 0f;
             IsDead = true;
         }
+    }
+
+    /// <summary>
+    /// If Energy >= threshold, split off a fraction into offspringEnergy and keep the rest.
+    /// Returns true if a split happened.
+    /// </summary>
+    public bool TrySplitForOffspring(float threshold, float fraction, out float offspringEnergy)
+    {
+        offspringEnergy = 0f;
+        if (IsDead || Energy < threshold) return false;
+
+        fraction = Mathf.Clamp01(fraction);
+        if (fraction <= 0f) return false;
+
+        float give = bodyEnergy * fraction;
+        bodyEnergy -= give;
+        offspringEnergy = give;
+
+        // clamp parent back within bounds just in case
+        bodyEnergy = Mathf.Clamp(bodyEnergy, 0f, maxEnergy);
+        return offspringEnergy > 0f;
     }
 
     // Neighborhood helper (cardinal + optional center)
