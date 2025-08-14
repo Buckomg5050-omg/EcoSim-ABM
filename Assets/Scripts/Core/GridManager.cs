@@ -82,4 +82,11 @@ public class GridManager : MonoBehaviour
             sizeZ * 0.5f - 0.5f * config.cellSize
         );
     }
+    public Vector2Int WorldToCell(Vector3 worldPos)
+{
+    int x = Mathf.FloorToInt(worldPos.x / config.cellSize);
+    int y = Mathf.FloorToInt(worldPos.z / config.cellSize);
+    return new Vector2Int(x, y);
+}
+
 }

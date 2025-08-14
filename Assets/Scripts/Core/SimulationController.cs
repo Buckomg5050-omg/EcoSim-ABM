@@ -17,6 +17,10 @@ public class SimulationController : MonoBehaviour
     private bool paused;
     private Transform agentsRoot;
 
+    private bool showReadout = true;
+    private Vector2Int mouseCell;
+    private bool hasMouseCell;
+
     private void Awake()
     {
         grid = Object.FindFirstObjectByType<GridManager>();
@@ -50,6 +54,30 @@ public class SimulationController : MonoBehaviour
         // Space toggles pause
         if (Input.GetKeyDown(KeyCode.Space))
             paused = !paused;
+
+        hasMouseCell = TryGetMouseCell(out mouseCell);
+    }
+
+    private bool TryGetMouseCell(out Vector2Int cell)
+    {
+        cell = default;
+        var cam = Camera.main;
+        if (cam == null || grid == null) return false;
+
+        Ray ray = cam.ScreenPointToRay(Input.mousePosition);
+        // Ground plane at y=0
+        Plane plane = new Plane(Vector3.up, Vector3.zero);
+        if (plane.Raycast(ray, out float enter))
+        {
+            Vector3 hit = ray.GetPoint(enter);
+            var c = grid.WorldToCell(hit);
+            if (grid.InBounds(c))
+            {
+                cell = c;
+                return true;
+            }
+        }
+        return false;
     }
 
     IEnumerator TickLoop()
@@ -172,5 +200,24 @@ public class SimulationController : MonoBehaviour
 
         if (GUI.Button(new Rect(280, 40, 80, 24), "Frame"))
             FrameCamera();
+
+        // --- NEW: Readouts ---
+        if (showReadout && env != null)
+        {
+            if (hasMouseCell)
+            {
+                float e = env.GetEnergy(mouseCell);
+                GUI.Label(new Rect(10, 70, 400, 22),
+                    $"Mouse cell: {mouseCell.x},{mouseCell.y}  Energy: {e:0.000}");
+            }
+
+            if (agents.Count > 0)
+            {
+                var a0 = agents[0];
+                float ea = env.GetEnergy(a0.GridPos);
+                GUI.Label(new Rect(10, 92, 400, 22),
+                    $"Agent_000 at {a0.GridPos.x},{a0.GridPos.y}  Energy: {ea:0.000}");
+            }
+        }
     }
 }
