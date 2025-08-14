@@ -31,6 +31,14 @@ public class GridManager : MonoBehaviour
         return cell.x >= 0 && cell.y >= 0 && cell.x < config.width && cell.y < config.height;
     }
 
+    public Vector2Int RandomCell(System.Random rng)
+    {
+        return new Vector2Int(
+            rng.Next(0, config.width),
+            rng.Next(0, config.height)
+        );
+    }
+
     // Draw the grid lines in the Scene/Game view when Gizmos are on
     private void OnDrawGizmos()
     {
