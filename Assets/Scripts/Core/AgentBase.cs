@@ -19,6 +19,9 @@ public abstract class AgentBase : MonoBehaviour
 
     public Vector2Int GridPos { get; private set; }
 
+    // NEW: public getter to expose the grid
+    public GridManager Grid => grid;
+
     // env is optional; if null we'll find one in the scene
     public virtual void Initialize(GridManager grid, System.Random rng, Vector2Int? start = null, EnvironmentGrid env = null)
     {
