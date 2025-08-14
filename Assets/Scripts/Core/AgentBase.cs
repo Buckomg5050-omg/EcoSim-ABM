@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 public abstract class AgentBase : MonoBehaviour
@@ -32,4 +33,21 @@ public abstract class AgentBase : MonoBehaviour
     // --- Simple environment helpers ---
     protected float SenseEnergy(Vector2Int pos) => env ? env.GetEnergy(pos) : 0f;
     protected float HarvestHere(float amount) => env ? env.Harvest(GridPos, amount) : 0f;
+
+    // --- NEW: neighborhood helper (cardinal + optional center) ---
+    protected IEnumerable<Vector2Int> CardinalNeighborhood(bool includeSelf = true)
+    {
+        if (includeSelf) yield return GridPos;
+
+        var dirs = new[]
+        {
+            Vector2Int.up, Vector2Int.right, Vector2Int.down, Vector2Int.left
+        };
+
+        for (int i = 0; i < dirs.Length; i++)
+        {
+            var p = GridPos + dirs[i];
+            if (grid.InBounds(p)) yield return p;
+        }
+    }
 }
