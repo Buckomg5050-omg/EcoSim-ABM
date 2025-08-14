@@ -98,8 +98,24 @@ public class SimulationController : MonoBehaviour
 
     private void TickOnce()
     {
+        // Decision/movement
         for (int i = 0; i < agents.Count; i++)
             agents[i].Step();
+
+        // Metabolism (may mark agents dead)
+        for (int i = 0; i < agents.Count; i++)
+            agents[i].ApplyMetabolism();
+
+        // Cull dead agents (destroy GO and remove from list)
+        for (int i = agents.Count - 1; i >= 0; i--)
+        {
+            if (agents[i].IsDead)
+            {
+                var go = agents[i].gameObject;
+                agents.RemoveAt(i);
+                if (go != null) Destroy(go);
+            }
+        }
 
         // Environment regrows a bit each tick, capped internally
         env?.TickRegen();
@@ -184,40 +200,45 @@ public class SimulationController : MonoBehaviour
     }
 
     // ---------- Debug UI ----------
-    private void OnGUI()
+   private void OnGUI()
+{
+    GUI.Label(new Rect(10, 10, 540, 24),
+        $"Ticks/sec: {ticksPerSecond:0.0}   Agents: {agents.Count}   {(paused ? "Paused" : "Running")} (Space toggles)");
+
+    if (GUI.Button(new Rect(10, 40, 80, 24), paused ? "Resume" : "Pause"))
+        paused = !paused;
+
+    if (paused && GUI.Button(new Rect(100, 40, 80, 24), "Step"))
+        TickOnce();
+
+    if (GUI.Button(new Rect(190, 40, 80, 24), "Reset"))
+        ResetAgents();
+
+    if (GUI.Button(new Rect(280, 40, 80, 24), "Frame"))
+        FrameCamera();
+
+    // --- NEW: Readouts ---
+    if (showReadout && env != null)
     {
-        GUI.Label(new Rect(10, 10, 540, 24),
-            $"Ticks/sec: {ticksPerSecond:0.0}   Agents: {agents.Count}   {(paused ? "Paused" : "Running")} (Space toggles)");
-
-        if (GUI.Button(new Rect(10, 40, 80, 24), paused ? "Resume" : "Pause"))
-            paused = !paused;
-
-        if (paused && GUI.Button(new Rect(100, 40, 80, 24), "Step"))
-            TickOnce();
-
-        if (GUI.Button(new Rect(190, 40, 80, 24), "Reset"))
-            ResetAgents();
-
-        if (GUI.Button(new Rect(280, 40, 80, 24), "Frame"))
-            FrameCamera();
-
-        // --- NEW: Readouts ---
-        if (showReadout && env != null)
+        if (hasMouseCell)
         {
-            if (hasMouseCell)
-            {
-                float e = env.GetEnergy(mouseCell);
-                GUI.Label(new Rect(10, 70, 400, 22),
-                    $"Mouse cell: {mouseCell.x},{mouseCell.y}  Energy: {e:0.000}");
-            }
+            float e = env.GetEnergy(mouseCell);
+            GUI.Label(new Rect(10, 70, 400, 22),
+                $"Mouse cell: {mouseCell.x},{mouseCell.y}  Energy: {e:0.000}");
+        }
 
-            if (agents.Count > 0)
-            {
-                var a0 = agents[0];
-                float ea = env.GetEnergy(a0.GridPos);
-                GUI.Label(new Rect(10, 92, 400, 22),
-                    $"Agent_000 at {a0.GridPos.x},{a0.GridPos.y}  Energy: {ea:0.000}");
-            }
+        if (agents.Count > 0)
+        {
+            var a0 = agents[0];
+            float ea = env.GetEnergy(a0.GridPos);
+            GUI.Label(new Rect(10, 92, 400, 22),
+                $"Agent_000 at {a0.GridPos.x},{a0.GridPos.y}  Cell E: {ea:0.000}");
+
+            // NEW: internal energy
+            GUI.Label(new Rect(10, 114, 400, 22),
+                $"Agent_000 body energy: {a0.Energy:0.000}");
         }
     }
+}
+
 }

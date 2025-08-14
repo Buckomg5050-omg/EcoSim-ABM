@@ -11,8 +11,9 @@ public class RandomWalkerAgent : AgentBase
 
     public override void Step()
     {
-        // Consume some energy at current cell (makes dents visible)
-        HarvestHere(harvestPerStep);
+        // Consume some energy at current cell and add to body store
+        float gained = HarvestHere(harvestPerStep);
+        GainEnergy(gained);
 
         // Build candidate moves: stay + 4-cardinal neighbors
         List<Vector2Int> options = new();
@@ -40,7 +41,6 @@ public class RandomWalkerAgent : AgentBase
             chosen = options[rng.Next(options.Count)];
         }
 
-        // Move (no-op if chosen == current cell)
         if (chosen != GridPos)
             MoveTo(chosen);
     }
