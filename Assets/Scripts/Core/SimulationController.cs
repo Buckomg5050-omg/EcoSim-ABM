@@ -26,8 +26,8 @@ public class SimulationController : MonoBehaviour
     [Range(60, 1024)] public int chartWidth = 320;
     [Range(40, 256)] public int chartHeight = 80;
 
-    // Declare enum WITHOUT a Header attribute (Unity doesn't allow it on enums)
-    public enum PolicyType { EpsilonGreedy, RichnessLinger }
+    // Enum (no Header attribute on enums)
+    public enum PolicyType { EpsilonGreedy, RichnessLinger, ObservationGreedy }
 
     [Header("Policy")]
     public PolicyType policy = PolicyType.EpsilonGreedy;
@@ -80,7 +80,6 @@ public class SimulationController : MonoBehaviour
             logPathShown = logger.LogPath;
         }
 
-        // Init counters/series
         tick = 0;
         popHistory.Clear();
         RecordPopulation(); // initial sample
@@ -170,7 +169,7 @@ public class SimulationController : MonoBehaviour
 
         // 6) Bookkeeping
         tick++;
-        RecordPopulation(); // sample + CSV + chart mark dirty
+        RecordPopulation();
     }
 
     // ---------- Helpers ----------
@@ -225,7 +224,6 @@ public class SimulationController : MonoBehaviour
 
     private void RecordPopulation()
     {
-        // history capped to chartWidth samples
         popHistory.Add(agents.Count);
         if (popHistory.Count > chartWidth) popHistory.RemoveAt(0);
         chartDirty = true;
@@ -272,6 +270,9 @@ public class SimulationController : MonoBehaviour
             case PolicyType.RichnessLinger:
                 pol = go.AddComponent<RichnessLingerPolicy>();
                 break;
+            case PolicyType.ObservationGreedy:
+                pol = go.AddComponent<GreedyObsPolicy>();
+                break;
         }
         a.policyBehaviour = pol;
 
@@ -281,7 +282,6 @@ public class SimulationController : MonoBehaviour
 
     public void ResetAgents()
     {
-        // Recreate RNG from current seed so spawns are deterministic for that seed
         rng = new System.Random(grid.config.seed);
 
         if (agentsRoot != null) Destroy(agentsRoot.gameObject);
@@ -289,19 +289,17 @@ public class SimulationController : MonoBehaviour
         agentsRoot = null;
         SpawnAgents();
 
-        // Reset counters & chart
         tick = 0;
         popHistory.Clear();
         chartDirty = true;
 
-        // Optionally start a fresh CSV
         if (enableCsvLogging && newLogOnReset)
         {
             logger?.StartNew("run", grid.config.seed, grid.config, logFlushEvery);
             logPathShown = logger.LogPath;
         }
 
-        RecordPopulation(); // log initial state
+        RecordPopulation();
     }
 
     // ---------- Camera helper ----------
@@ -353,7 +351,6 @@ public class SimulationController : MonoBehaviour
         if (!showPopChart) return;
         EnsureChartTexture();
 
-        // Clear background (semi-transparent dark)
         int total = chartPixels.Length;
         for (int i = 0; i < total; i++) chartPixels[i] = new Color32(0, 0, 0, 160);
 
@@ -364,7 +361,6 @@ public class SimulationController : MonoBehaviour
             for (int i = 0; i < count; i++) if (popHistory[i] > maxVal) maxVal = popHistory[i];
             lastWindowMax = maxVal;
 
-            // Plot as columns/resampled
             for (int x = 0; x < chartWidth; x++)
             {
                 int idx = Mathf.RoundToInt(Mathf.Lerp(0, count - 1, (float)x / (chartWidth - 1)));
@@ -376,7 +372,6 @@ public class SimulationController : MonoBehaviour
                 for (int y = pyTop; y < chartHeight; y++)
                 {
                     int ii = y * chartWidth + px;
-                    // lighter for the column, bright white at the tip
                     if (y == pyTop) chartPixels[ii] = new Color32(255, 255, 255, 255);
                     else chartPixels[ii] = new Color32(220, 220, 220, 80);
                 }
@@ -406,7 +401,6 @@ public class SimulationController : MonoBehaviour
         if (GUI.Button(new Rect(280, 40, 80, 24), "Frame"))
             FrameCamera();
 
-        // Readouts
         if (showReadout && env != null)
         {
             if (hasMouseCell)
@@ -424,7 +418,6 @@ public class SimulationController : MonoBehaviour
             }
         }
 
-        // Population chart + log path
         if (showPopChart)
         {
             if (chartDirty) RebuildChartTexture();
