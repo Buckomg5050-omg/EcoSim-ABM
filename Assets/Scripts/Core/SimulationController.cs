@@ -52,6 +52,10 @@ public class SimulationController : MonoBehaviour
     [Min(1)] public int boostRadius = 5;          // cells
     [Min(0f)] public float boostGrant = 0.5f;     // body-energy added per agent
 
+    [Header("Rain (Mouse)")]
+    [Min(1)] public int rainRadius = 5;           // cells
+    [Range(0f, 1f)] public float rainToFrac = 0.85f; // raise cells up to 85% of max (if below)
+
     [Header("Episodes")]
     public bool enableEpisodes = true;
     [Min(1)] public int maxTicksPerEpisode = 2000;
@@ -208,6 +212,11 @@ public class SimulationController : MonoBehaviour
         {
             // Boost agents at mouse
             BoostAgentsAt(mouseCell, boostRadius, boostGrant);
+        }
+        
+        if (Input.GetKeyDown(KeyCode.G) && hasMouseCell) // G = "Grow"
+        {
+            ApplyRainAt(mouseCell, rainRadius, rainToFrac);
         }
 
         if (Input.GetKeyDown(KeyCode.H))
@@ -774,8 +783,9 @@ public class SimulationController : MonoBehaviour
         if (env == null || grid == null) return;
         radius = Mathf.Max(1, radius);
         keepFraction = Mathf.Clamp01(keepFraction);
-
         int r2 = radius * radius;
+        bool anyHarvested = false;
+
         for (int dy = -radius; dy <= radius; dy++)
         for (int dx = -radius; dx <= radius; dx++)
         {
@@ -788,7 +798,52 @@ public class SimulationController : MonoBehaviour
 
             float target = e * keepFraction;     // e.g., keep 25% of current
             float remove = Mathf.Max(0f, e - target);
-            if (remove > 0f) env.Harvest(p, remove);
+            if (remove > 0f) 
+            {
+                float harvested = env.Harvest(p, remove);
+                anyHarvested = anyHarvested || (harvested > 0f);
+            }
+        }
+        
+        // Log the drought event if any energy was harvested
+        if (anyHarvested && logger != null)
+        {
+            logger.LogEvent(tick, "drought", center.x, center.y, radius, keepFraction);
+        }
+    }
+
+    private void ApplyRainAt(Vector2Int center, int radius, float targetFraction)
+    {
+        if (env == null || grid == null) return;
+
+        radius = Mathf.Max(1, radius);
+        targetFraction = Mathf.Clamp01(targetFraction);
+        int r2 = radius * radius;
+        float maxE = Mathf.Max(0.0001f, env.maxEnergyPerCell);
+        bool anyDeposited = false;
+
+        for (int dy = -radius; dy <= radius; dy++)
+        for (int dx = -radius; dx <= radius; dx++)
+        {
+            if (dx*dx + dy*dy > r2) continue;
+            var p = new Vector2Int(center.x + dx, center.y + dy);
+            if (!grid.InBounds(p)) continue;
+
+            float cur = env.GetEnergy(p);
+            float target = targetFraction * maxE;
+            float add = Mathf.Max(0f, target - cur); // only raise if below target
+            if (add > 0f)
+            {
+                // Use the new Deposit method to add energy
+                float deposited = env.Deposit(p, add);
+                anyDeposited = anyDeposited || (deposited > 0f);
+            }
+        }
+        
+        // Log the rain event if any energy was deposited
+        if (anyDeposited && logger != null)
+        {
+            logger.LogEvent(tick, "rain", center.x, center.y, radius, targetFraction);
         }
     }
 
@@ -1010,20 +1065,29 @@ public class SimulationController : MonoBehaviour
                           $"→ {fname}  (…/persistentDataPath/Logs)");
             }
 
-            // Drought @ mouse (local depletion)
-            bool canShock = (env != null && hasMouseCell);
-            GUI.enabled = canShock;
-            if (GUI.Button(new Rect(x, yCtrl + controlsH + 4, 200, controlsH), $"Drought @Mouse (R:{shockRadius}, Keep:{droughtToFrac:P0})"))
+            // Drought @ mouse (deplete environment)
+            bool canDrought = (env != null && hasMouseCell);
+            GUI.enabled = canDrought;
+            if (GUI.Button(new Rect(x + 120 + gap, yCtrl + controlsH + 4, 90, controlsH), $"Drought @Mouse (R:{shockRadius})"))
             {
+                // Local depletion at mouse
                 ApplyDroughtAt(mouseCell, shockRadius, droughtToFrac);
             }
-
+            
             // Boost @ mouse (agent energy rain)
             bool canBoost = hasMouseCell && agents.Count > 0;
             GUI.enabled = canBoost;
-            if (GUI.Button(new Rect(x + 210, yCtrl + controlsH + 4, 200, controlsH), $"Boost Agents @Mouse (R:{boostRadius}, +{boostGrant:F1}⚡)"))
+            if (GUI.Button(new Rect(x + 120 + gap + 90 + gap, yCtrl + controlsH + 4, 200, controlsH), $"Boost Agents @Mouse (R:{boostRadius}, +{boostGrant:F1}⚡)"))
             {
                 BoostAgentsAt(mouseCell, boostRadius, boostGrant);
+            }
+            
+            // Rain @ mouse (increase environment energy)
+            bool canRain = (env != null && hasMouseCell);
+            GUI.enabled = canRain;
+            if (GUI.Button(new Rect(x + 120 + gap + 90 + gap + 200 + gap, yCtrl + controlsH + 4, 120, controlsH), $"Rain @Mouse (R:{rainRadius}, {rainToFrac:P0})"))
+            {
+                ApplyRainAt(mouseCell, rainRadius, rainToFrac);
             }
             GUI.enabled = true;
 

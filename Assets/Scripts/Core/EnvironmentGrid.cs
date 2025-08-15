@@ -110,6 +110,23 @@ public class EnvironmentGrid : MonoBehaviour
         return take;
     }
 
+    public float Deposit(Vector2Int cell, float amount)
+    {
+        if (amount <= 0f) return 0f;
+        if (!InBounds(cell) || energy == null) return 0f;
+
+        int i = Index(cell);
+        float cur = energy[i];
+        float max = Mathf.Max(0.0001f, maxEnergyPerCell);
+        float add = Mathf.Min(amount, max - cur);
+        
+        if (add <= 0f) return 0f;
+        
+        // Apply the deposit
+        energy[i] = cur + add;
+        return add;
+    }
+
     public void RegenTick(float amountPerCell)
     {
         if (grid == null || grid.config == null || energy == null) return;
