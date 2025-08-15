@@ -25,3 +25,6 @@
 
 # Crash/other
 *.stackdump
+
+# Unity ML-Agents timers (generated)
+/Assets/ML-Agents/Timers/
