@@ -34,6 +34,11 @@ public class SimulationController : MonoBehaviour
     [Header("Policy")]
     public PolicyType policy = PolicyType.EpsilonGreedy;
 
+    [Header("Presets")]
+    public string presetsFolder = "Presets"; // Resources/Presets
+    private SimPreset[] presets = System.Array.Empty<SimPreset>();
+    private int presetIndex = 0;
+
     [Header("Reward")]
     public float metabolismPenaltyScale = 1f; // reward -= scale * metabolismPerTick
     public float deathPenalty = 1f;           // applied once on death
@@ -86,6 +91,10 @@ public class SimulationController : MonoBehaviour
         }
 
         env = UnityEngine.Object.FindFirstObjectByType<EnvironmentGrid>();
+
+        // Load presets from Resources/Presets
+        presets = Resources.LoadAll<SimPreset>(presetsFolder);
+        if (presets.Length > 0) presetIndex = Mathf.Clamp(presetIndex, 0, presets.Length - 1);
 
         rng = new System.Random(grid.config.seed);
         SpawnAgents();
@@ -570,6 +579,44 @@ public class SimulationController : MonoBehaviour
         chartDirty = false;
     }
 
+    private void ApplyPreset(SimPreset p)
+    {
+        if (p == null) return;
+
+        // Grid seed (affects env + spawn determinism)
+        if (grid != null && grid.config != null)
+            grid.config.seed = p.seed;
+
+        // Environment parameters + rebuild field
+        if (env != null)
+        {
+            env.maxEnergyPerCell  = p.maxEnergyPerCell;
+            env.initialFill       = p.initialFill;
+            env.noiseScale        = p.noiseScale;
+            env.noiseOctaves      = p.noiseOctaves;
+            env.noisePersistence  = p.noisePersistence;
+            env.regenPerTick      = p.regenPerTick;
+            // ensure the field is rebuilt immediately for the new seed/params
+            env.RebuildNow();
+        }
+
+        // Sim params
+        numberOfAgents           = Mathf.Max(1, p.numberOfAgents);
+        ticksPerSecond           = Mathf.Clamp(p.ticksPerSecond, 0.5f, 60f);
+
+        // Reproduction
+        enableReproduction       = p.enableReproduction;
+        reproduceThreshold       = Mathf.Max(0.01f, p.reproduceThreshold);
+        offspringEnergyFraction  = Mathf.Clamp01(p.offspringEnergyFraction);
+        maxAgents                = Mathf.Max(1, p.maxAgents);
+
+        // Policy (our runtime switcher will handle the reset)
+        policy = p.policy;
+
+        // Respawn with new seed/policy/settings
+        ResetAgents();
+    }
+
     // ---------- Debug UI ----------
     private void OnGUI()
     {
@@ -642,6 +689,31 @@ public class SimulationController : MonoBehaviour
             // reserve space: chart frame + controls row at the very bottom
             int yBoxTop = Screen.height - pad - (chartHeight + 2 * boxPad) - controlsH - controlsGapY;
             int yLabel  = yBoxTop - (labelH + 2);
+
+            // --- Preset chooser (above the chart title) ---
+            int yPreset = yLabel - (controlsH + 4);
+
+            if (presets != null && presets.Length > 0)
+            {
+                string pname = presets[presetIndex].displayName;
+                GUI.Label(new Rect(x, yPreset, 260, controlsH), $"Preset: {pname} ({presets.Length})");
+
+                // Prev
+                if (GUI.Button(new Rect(x + 200, yPreset, 26, controlsH), "<"))
+                    presetIndex = (presetIndex - 1 + presets.Length) % presets.Length;
+
+                // Apply
+                if (GUI.Button(new Rect(x + 230, yPreset, 60, controlsH), "Apply"))
+                    ApplyPreset(presets[presetIndex]);
+
+                // Next
+                if (GUI.Button(new Rect(x + 294, yPreset, 26, controlsH), ">"))
+                    presetIndex = (presetIndex + 1) % presets.Length;
+            }
+            else
+            {
+                GUI.Label(new Rect(x, yPreset, 360, controlsH), "Presets: none (add to Resources/Presets)");
+            }
 
             // Title
             GUI.Label(new Rect(x, yLabel, 300, labelH), $"Population (window max: {lastWindowMax})");

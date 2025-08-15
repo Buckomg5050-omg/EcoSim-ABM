@@ -38,6 +38,12 @@ public class EnvironmentGrid : MonoBehaviour
     }
 #endif
 
+    public void RebuildNow()
+    {
+        // Calls the existing private method that rebuilds the field & gizmos
+        TryBuildInitial();
+    }
+
     private void TryBuildInitial()
     {
         if (grid == null || grid.config == null) return;
