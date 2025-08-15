@@ -31,6 +31,12 @@ public abstract class AgentBase : MonoBehaviour
     public float LastReward => lastReward;
     public float CumulativeReward => cumulativeReward;
 
+    // Public wrapper so systems outside the agent (e.g., SimulationController) can grant energy safely.
+    public void AddEnergy(float amount)
+    {
+        GainEnergy(amount); // clamps internally to [0, maxEnergy]
+    }
+
     // Track how much we harvested this step (optional)
     protected float lastGained;
 

@@ -47,6 +47,10 @@ public class SimulationController : MonoBehaviour
     [Header("Shock (Mouse)")]
     [Min(1)] public int shockRadius = 5;          // cells
     [Range(0f, 1f)] public float droughtToFrac = 0.25f; // keep this fraction of current energy (e.g., 25%)
+    
+    [Header("Boost (Mouse)")]
+    [Min(1)] public int boostRadius = 5;          // cells
+    [Min(0f)] public float boostGrant = 0.5f;     // body-energy added per agent
 
     [Header("Episodes")]
     public bool enableEpisodes = true;
@@ -142,6 +146,48 @@ public class SimulationController : MonoBehaviour
             paused = !paused;
 
         hasMouseCell = TryGetMouseCell(out mouseCell);
+
+        // --- Hotkeys ---
+        if (Input.GetKeyDown(KeyCode.R))
+            ResetAgents();
+
+        if (Input.GetKeyDown(KeyCode.F))
+            FrameCamera();
+
+        if (Input.GetKeyDown(KeyCode.L))
+        {
+            loggingEnabled = !loggingEnabled;
+            if (!loggingEnabled && loggingStarted)
+            {
+                logger?.Close();
+                loggingStarted = false;
+                logPathShown = null;
+            }
+        }
+
+        if (Input.GetKeyDown(KeyCode.N))
+        {
+            // Arm a rollover; new file will start on the next tick if logging is enabled
+            newLogArmed = true;
+        }
+
+        if (Input.GetKeyDown(KeyCode.D) && hasMouseCell)
+        {
+            // Local depletion at mouse
+            ApplyDroughtAt(mouseCell, shockRadius, droughtToFrac);
+        }
+        
+        if (Input.GetKeyDown(KeyCode.B) && hasMouseCell)
+        {
+            // Boost agents at mouse
+            BoostAgentsAt(mouseCell, boostRadius, boostGrant);
+        }
+
+        // Policy quick-switch
+        if (Input.GetKeyDown(KeyCode.Alpha1)) SetPolicyAndReset(PolicyType.EpsilonGreedy);
+        if (Input.GetKeyDown(KeyCode.Alpha2)) SetPolicyAndReset(PolicyType.RichnessLinger);
+        if (Input.GetKeyDown(KeyCode.Alpha3)) SetPolicyAndReset(PolicyType.ObservationGreedy);
+        if (Input.GetKeyDown(KeyCode.Alpha4)) SetPolicyAndReset(PolicyType.MLAgents);
     }
 
     IEnumerator TickLoop()
@@ -716,6 +762,26 @@ public class SimulationController : MonoBehaviour
         }
     }
 
+    private void BoostAgentsAt(Vector2Int center, int radius, float grant)
+    {
+        if (agents == null || agents.Count == 0) return;
+        radius = Mathf.Max(1, radius);
+        grant = Mathf.Max(0f, grant);
+        int r2 = radius * radius;
+
+        for (int i = 0; i < agents.Count; i++)
+        {
+            var a = agents[i];
+            var p = a.GridPos;
+            int dx = p.x - center.x;
+            int dy = p.y - center.y;
+            if (dx * dx + dy * dy <= r2)
+            {
+                a.AddEnergy(grant); // Uses public wrapper that clamps to maxEnergy
+            }
+        }
+    }
+
     private void RecordPopulation(int birthsThisTick, int deathsThisTick)
     {
         // Population history
@@ -920,6 +986,14 @@ public class SimulationController : MonoBehaviour
             if (GUI.Button(new Rect(x, yCtrl + controlsH + 4, 200, controlsH), $"Drought @Mouse (R:{shockRadius}, Keep:{droughtToFrac:P0})"))
             {
                 ApplyDroughtAt(mouseCell, shockRadius, droughtToFrac);
+            }
+
+            // Boost @ mouse (agent energy rain)
+            bool canBoost = hasMouseCell && agents.Count > 0;
+            GUI.enabled = canBoost;
+            if (GUI.Button(new Rect(x + 210, yCtrl + controlsH + 4, 200, controlsH), $"Boost Agents @Mouse (R:{boostRadius}, +{boostGrant:F1}⚡)"))
+            {
+                BoostAgentsAt(mouseCell, boostRadius, boostGrant);
             }
             GUI.enabled = true;
         }
