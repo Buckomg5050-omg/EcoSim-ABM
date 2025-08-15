@@ -227,6 +227,9 @@ public class SimulationController : MonoBehaviour
         if (Input.GetKeyDown(KeyCode.Alpha2)) SetPolicyAndReset(PolicyType.RichnessLinger);
         if (Input.GetKeyDown(KeyCode.Alpha3)) SetPolicyAndReset(PolicyType.ObservationGreedy);
         if (Input.GetKeyDown(KeyCode.Alpha4)) SetPolicyAndReset(PolicyType.MLAgents);
+        
+        if (Input.GetKeyDown(KeyCode.S)) // S = Seed reroll
+            SetSeedAndReset(NewRandomSeed());
     }
 
     IEnumerator TickLoop()
@@ -368,6 +371,27 @@ public class SimulationController : MonoBehaviour
         if (policy == p) return;
         policy = p;
         ResetAgents(); // respawns with the new policy selection
+    }
+
+    private void SetSeedAndReset(int newSeed)
+    {
+        if (grid?.config == null) return;
+        newSeed = Mathf.Clamp(newSeed, 1, int.MaxValue); // keep System.Random happy
+        if (grid.config.seed == newSeed) return;
+
+        grid.config.seed = newSeed;
+        env?.RebuildNow();  // rebuild field for the new seed
+        ResetAgents();      // respawn deterministically with this seed
+    }
+
+    private static int NewRandomSeed()
+    {
+        unchecked
+        {
+            int s = System.Environment.TickCount ^ (int)System.DateTime.Now.Ticks;
+            var r = new System.Random(s);
+            return r.Next(1, int.MaxValue);
+        }
     }
 
     private Vector2Int ChooseBirthCell(Vector2Int center)
@@ -1003,6 +1027,34 @@ public class SimulationController : MonoBehaviour
                 GUI.Label(new Rect(x, yPreset, 360, controlsH), "Presets: none (add to Resources/Presets)");
             }
 
+            // --- Seed controls (under preset row) ---
+            int ySeed = yLabel - (controlsH + 4); // one row above the chart title
+            string seedLabel = (grid != null && grid.config != null) ? grid.config.seed.ToString() : "-";
+            GUI.Label(new Rect(x, ySeed, 40, controlsH), "Seed:");
+
+            // -1000
+            if (GUI.Button(new Rect(x + 40, ySeed, 44, controlsH), "-1k"))
+                SetSeedAndReset((grid?.config?.seed ?? 1) - 1000);
+
+            // -1
+            if (GUI.Button(new Rect(x + 88, ySeed, 30, controlsH), "-1"))
+                SetSeedAndReset((grid?.config?.seed ?? 1) - 1);
+
+            // Seed display
+            GUI.Label(new Rect(x + 122, ySeed, 100, controlsH), seedLabel);
+
+            // +1
+            if (GUI.Button(new Rect(x + 226, ySeed, 30, controlsH), "+1"))
+                SetSeedAndReset((grid?.config?.seed ?? 1) + 1);
+
+            // +1000
+            if (GUI.Button(new Rect(x + 260, ySeed, 44, controlsH), "+1k"))
+                SetSeedAndReset((grid?.config?.seed ?? 1) + 1000);
+
+            // Reroll
+            if (GUI.Button(new Rect(x + 308, ySeed, 60, controlsH), "Reroll"))
+                SetSeedAndReset(NewRandomSeed());
+
             // Title
             GUI.Label(new Rect(x, yLabel, 300, labelH), $"Population (window max: {lastWindowMax})");
 
@@ -1118,6 +1170,7 @@ public class SimulationController : MonoBehaviour
                 GUI.Label(new Rect(lx, ly, helpW - 20, lh), "L – Toggle logging (OFF/armed/ON)", helpLabelStyle); ly += lh;
                 GUI.Label(new Rect(lx, ly, helpW - 20, lh), "N – New Log (fresh file next tick)", helpLabelStyle); ly += lh;
                 GUI.Label(new Rect(lx, ly, helpW - 20, lh), "D – Drought @Mouse (deplete area)", helpLabelStyle); ly += lh;
+                GUI.Label(new Rect(lx, ly, helpW - 20, lh), "S – Reroll world seed", helpLabelStyle); ly += lh;
                 GUI.Label(new Rect(lx, ly, helpW - 20, lh), "B – Boost Agents @Mouse (grant energy)", helpLabelStyle); ly += lh;
                 GUI.Label(new Rect(lx, ly, helpW - 20, lh), "H – Toggle this help overlay", helpLabelStyle); ly += lh;
                 GUI.Label(new Rect(lx, ly, helpW - 20, lh), "1/2/3/4 – Policy: ε-Greedy / Linger / ObsGreedy / ML-Agents", helpLabelStyle); ly += lh + 8;
