@@ -67,25 +67,31 @@ Agent-Based Modeling (ABM) sandbox in Unity for simulating ecosystem dynamics, v
 
 ---
 
-## Controls & HUD
+## Controls & Hotkeys (current)
 
-* **Space** → Pause/Resume
-* **Step** (button) → advance exactly one tick when paused
-* **Reset** → destroy & respawn agents (deterministic given current seed)
-* **Frame** → position camera to view the entire grid
-* **Policy buttons** → ε-Greedy, Linger, ObsGreedy, ML-Agents (auto-Reset)
-* **Readouts (top-left):**
+**Core**
+- **Space** – Pause/Resume
+- **Step** (button) – Advance one tick when paused
+- **Reset** (button or **R**) – Respawn agents (deterministic for current seed)
+- **Frame** (button or **F**) – Frame camera to grid
 
-  * Tick rate, agent count, pause state
-  * Mouse cell & energy, Agent\_000 cell energy & body energy, last/cumulative reward
-* **Bottom-left**:
+**Policies** (row of buttons or hotkeys)
+- **1** = ε-Greedy **2** = Linger **3** = ObsGreedy **4** = ML-Agents  
+(Switching policies auto-Resets agents.)
 
-  * **Population chart** (sparkline bars)
-  * **Logging**: OFF → armed → ON (toggle)
-  * **New Log**: close current file and start fresh on next tick
-  * **Snapshot**: export run config/status to JSON
-  * **Drought @Mouse**: deplete local area around mouse
-* **Start paused by default** so you can select agents/params first.
+**Bottom-left chart & controls**
+- Population bars; mini-chart: **Births** (white), **Deaths** (gray), **Mean energy** (cyan)
+- **Logging** (toggle or **L**) – OFF → armed → ON (file starts on first tick)
+- **New Log** (button or **N**) – close current CSV, start fresh on next tick
+- **Snapshot** – write JSON with config/seed/tick/policy to `.../Exports/`
+- **Drought @Mouse** (button or **D**) – deplete energy in a disc around mouse cell
+- **Boost Agents @Mouse** (button or **B**) – grant body energy to agents in a disc around mouse cell
+
+**Help**
+- **Help** (button) or **H** – Toggle overlay with hotkeys/legend/tips
+
+**Presets**
+- Bottom-left preset picker: `<` / **Apply** / `>` to load ScriptableObject presets (auto-Reset)
 
 ---
 
