@@ -56,6 +56,9 @@ public class SimulationController : MonoBehaviour
     [Min(1)] public int rainRadius = 5;           // cells
     [Range(0f, 1f)] public float rainToFrac = 0.85f; // raise cells up to 85% of max (if below)
 
+    [Header("Spawning")]
+    public GameObject agentPrefab; // assign Prefabs/Agent in Inspector
+
     [Header("Episodes")]
     public bool enableEpisodes = true;
     [Min(1)] public int maxTicksPerEpisode = 2000;
@@ -63,6 +66,13 @@ public class SimulationController : MonoBehaviour
     public bool resetWhenMaxTicks = true;
 
     private int episodeIndex = 0;
+
+    private Vector3 CellCenterWorld(Vector2Int c)
+    {
+        // Convert grid cell → world center using GridConfig cellSize, origin at (0,0,0)
+        float s = (grid != null && grid.config != null) ? grid.config.cellSize : 1f;
+        return new Vector3((c.x + 0.5f) * s, 0f, (c.y + 0.5f) * s);
+    }
 
     private GridManager grid;
     private EnvironmentGrid env;
@@ -77,6 +87,12 @@ public class SimulationController : MonoBehaviour
     private Vector2Int mouseCell;
     private bool showHelp;
     private bool showReadout = true;
+
+    // Training HUD / telemetry
+    private float emaReward;             // exponential moving average of per-tick total reward
+    [Range(0.01f, 0.5f)] public float emaAlpha = 0.1f;  // smoothing
+    private string trainingModeStr = "—";
+    private bool trainerConnected = false;
     
     // Runtime GUI styles (safe in builds)
     private GUIStyle helpTitleStyle, helpLabelStyle, helpMiniStyle;
@@ -357,6 +373,39 @@ public class SimulationController : MonoBehaviour
             if ((resetWhenAllDead && allDead) || (resetWhenMaxTicks && hitMax))
                 ResetEpisode();
         }
+
+        // Update training telemetry
+        float totalR = 0f;
+        for (int i = 0; i < agents.Count; i++) totalR += agents[i].LastReward;
+        emaReward = Mathf.Lerp(emaReward, totalR, emaAlpha);
+
+        // Detect current mode & connection
+#if MLAGENTS_PRESENT
+        // BehaviorType from any active ML agent (they all share)
+        var anyAdapter = (agents.Count > 0) ? agents[0].GetComponent<MLAgentsAdapter>() : null;
+        var bp = anyAdapter ? anyAdapter.GetComponent<Unity.MLAgents.Policies.BehaviorParameters>() : null;
+        if (bp != null)
+        {
+            switch (bp.BehaviorType)
+            {
+                case Unity.MLAgents.Policies.BehaviorType.HeuristicOnly: trainingModeStr = "Heuristic"; break;
+                case Unity.MLAgents.Policies.BehaviorType.InferenceOnly: trainingModeStr = "Inference"; break;
+                default: trainingModeStr = "Training"; break; // Default = trainer
+            }
+        }
+        // Trainer connection (best-effort — guarded for API differences)
+        try
+        {
+            var acad = Unity.MLAgents.Academy.Instance;
+            // Many versions expose IsCommunicatorOn; reflect safely:
+            var prop = typeof(Unity.MLAgents.Academy).GetProperty("IsCommunicatorOn");
+            trainerConnected = prop != null && (bool)prop.GetValue(acad, null);
+        }
+        catch { trainerConnected = false; }
+#else
+        trainingModeStr = policy.ToString();
+        trainerConnected = false;
+#endif
     }
 
     private void ResetEpisode()
@@ -454,53 +503,94 @@ public class SimulationController : MonoBehaviour
             SpawnOneAgent(startCell: null, startEnergyOverride: null);
     }
 
-    private void SpawnOneAgent(Vector2Int? startCell, float? startEnergyOverride)
+    private AgentBase SpawnOneAgent(Vector2Int? startCell = null, float? startEnergyOverride = null)
     {
-        var go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
-        go.name = $"Agent_{agents.Count:D3}";
-        go.transform.SetParent(agentsRoot, worldPositionStays: false);
-        go.transform.localScale = Vector3.one * (0.6f * grid.config.cellSize);
+        var cell = startCell ?? grid.RandomCell(rng);
+        Vector3 world = CellCenterWorld(cell);
 
-        // Tint
-        var rend = go.GetComponent<Renderer>();
-        var mat = new Material(rend.sharedMaterial);
-        var c = ColorFromIndex(agents.Count);
-        if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", c);
-        if (mat.HasProperty("_Color"))     mat.SetColor("_Color", c);
-        rend.material = mat;
+        GameObject go;
+        if (agentPrefab != null)
+        {
+            go = Instantiate(agentPrefab, world, Quaternion.identity, agentsRoot);
+            go.name = $"Agent_{agents.Count:D3}";
+        }
+        else
+        {
+            // Fallback: create a simple visual if prefab missing
+            go = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            go.transform.SetParent(agentsRoot, worldPositionStays: true);
+            go.transform.position = world;
+            go.transform.localScale = Vector3.one * (0.6f * grid.config.cellSize);
+            go.name = $"Agent_Fallback_{agents.Count:D3}";
+            go.AddComponent<RandomWalkerAgent>();
+        }
 
-        var a = go.AddComponent<RandomWalkerAgent>();
+        // Get or add AgentBase component
+        var agent = go.GetComponent<AgentBase>();
+        if (agent == null)
+        {
+            agent = go.AddComponent<RandomWalkerAgent>();
+        }
+
+        // Initialize energy if specified
         if (startEnergyOverride.HasValue)
-            a.startEnergy = Mathf.Min(a.maxEnergy, Mathf.Max(0f, startEnergyOverride.Value));
+            agent.startEnergy = Mathf.Min(agent.maxEnergy, Mathf.Max(0f, startEnergyOverride.Value));
 
-        // Choose and attach policy BEFORE Initialize so the agent uses it
-        MonoBehaviour pol = null;
+        // Add appropriate policy component based on current policy
         switch (policy)
         {
             case PolicyType.EpsilonGreedy:
-                pol = go.AddComponent<EpsilonGreedyEnergyPolicy>();
+                go.AddComponent<EpsilonGreedyEnergyPolicy>();
                 break;
             case PolicyType.RichnessLinger:
-                pol = go.AddComponent<RichnessLingerPolicy>();
+                go.AddComponent<RichnessLingerPolicy>();
                 break;
             case PolicyType.ObservationGreedy:
-                pol = go.AddComponent<GreedyObsPolicy>();
+                go.AddComponent<GreedyObsPolicy>();
                 break;
             case PolicyType.MLAgents:
             #if MLAGENTS_PRESENT
-                go.AddComponent<MLAgentsAdapter>();            // ML Agent component
-                pol = go.AddComponent<MLAgentsActionPolicy>(); // IActionPolicy that reads adapter's action
+                if (go.GetComponent<MLAgentsAdapter>() == null)
+                    go.AddComponent<MLAgentsAdapter>();
+                go.AddComponent<MLAgentsActionPolicy>();
                 break;
             #else
                 Debug.LogWarning("MLAgents not present; falling back to GreedyObsPolicy.");
-                pol = go.AddComponent<GreedyObsPolicy>();
+                go.AddComponent<GreedyObsPolicy>();
                 break;
             #endif
         }
 
-        a.policyBehaviour = pol;
-        a.Initialize(grid, rng, startCell, env);
-        agents.Add(a);
+        // Handle ML-Agents behavior parameters if needed
+#if MLAGENTS_PRESENT
+        if (policy == PolicyType.MLAgents)
+        {
+            var adapter = go.GetComponent<MLAgentsAdapter>();
+            if (adapter == null) adapter = go.AddComponent<MLAgentsAdapter>();
+            
+            var bp = adapter.GetComponent<Unity.MLAgents.Policies.BehaviorParameters>();
+            if (bp != null)
+            {
+                bp.BehaviorName = "EcoAgent";
+            }
+        }
+#endif
+
+        agent.Initialize(grid, rng, cell, env);
+        agents.Add(agent);
+
+        // Apply deterministic tinting
+        var rend = go.GetComponent<Renderer>();
+        if (rend != null)
+        {
+            var mat = new Material(rend.sharedMaterial);
+            var c = ColorFromIndex(agents.Count - 1);
+            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", c);
+            if (mat.HasProperty("_Color")) mat.SetColor("_Color", c);
+            rend.material = mat;
+        }
+
+        return agent;
     }
 
     public void ResetAgents()
@@ -1149,6 +1239,27 @@ public class SimulationController : MonoBehaviour
 
             // Ensure styles are initialized
             EnsureHelpStyles();
+
+            // --- Training HUD (top-right) ---
+            int hudW = 280, hudH = 86;
+            var rHUD = new Rect(Screen.width - hudW - 10, 10, hudW, hudH);
+            GUI.Box(rHUD, GUIContent.none);
+
+            // renamed to avoid shadowing lx/ly/lh from other UI blocks
+            float hudX = rHUD.x + 10f;
+            float hudY = rHUD.y + 8f;
+            float hudLineH = 18f;
+
+            string conn = trainerConnected ? "Connected" : "Not connected";
+            GUI.Label(new Rect(hudX, hudY, hudW - 20, hudLineH), $"Mode: {trainingModeStr}  ({conn})"); hudY += hudLineH;
+            GUI.Label(new Rect(hudX, hudY, hudW - 20, hudLineH), $"Tick: {tick}   Agents: {agents.Count}"); hudY += hudLineH;
+            GUI.Label(new Rect(hudX, hudY, hudW - 20, hudLineH), $"Reward EMA (per tick): {emaReward:+0.000;-0.000;0.000}"); hudY += hudLineH;
+
+            // quick actions (optional)
+            if (GUI.Button(new Rect(hudX, hudY, 120, 22), "Heuristic"))
+                SetPolicyAndReset(PolicyType.ObservationGreedy);
+            if (GUI.Button(new Rect(hudX + 126, hudY, 120, 22), "ML-Agents"))
+                SetPolicyAndReset(PolicyType.MLAgents);
 
             if (GUI.Button(new Rect(Screen.width - 80, 10, 70, 24), showHelp ? "Help ✓" : "Help"))
                 showHelp = !showHelp;
