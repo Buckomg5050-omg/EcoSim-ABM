@@ -68,10 +68,14 @@ public class SimulationController : MonoBehaviour
     private bool paused;
     private Transform agentsRoot;
 
-    // Readouts
-    private bool showReadout = true;
-    private Vector2Int mouseCell;
+    // UI state
     private bool hasMouseCell;
+    private Vector2Int mouseCell;
+    private bool showHelp;
+    private bool showReadout = true;
+    
+    // Runtime GUI styles (safe in builds)
+    private GUIStyle helpTitleStyle, helpLabelStyle, helpMiniStyle;
 
     // Ticks & logging
     private int tick;
@@ -139,6 +143,29 @@ public class SimulationController : MonoBehaviour
         if (loop != null) StopCoroutine(loop);
         logger?.Close();
     }
+    
+    private void EnsureHelpStyles()
+    {
+        if (helpTitleStyle != null) return;
+
+        helpTitleStyle = new GUIStyle(GUI.skin.label)
+        {
+            fontStyle = FontStyle.Bold,
+            fontSize = 14
+        };
+
+        helpLabelStyle = new GUIStyle(GUI.skin.label)
+        {
+            fontSize = 12
+        };
+
+        helpMiniStyle = new GUIStyle(GUI.skin.label)
+        {
+            fontSize = 11
+        };
+        // Optional: a softer gray for mini text
+        helpMiniStyle.normal.textColor = new Color(0.85f, 0.85f, 0.85f, 1f);
+    }
 
     private void Update()
     {
@@ -182,6 +209,9 @@ public class SimulationController : MonoBehaviour
             // Boost agents at mouse
             BoostAgentsAt(mouseCell, boostRadius, boostGrant);
         }
+
+        if (Input.GetKeyDown(KeyCode.H))
+            showHelp = !showHelp;
 
         // Policy quick-switch
         if (Input.GetKeyDown(KeyCode.Alpha1)) SetPolicyAndReset(PolicyType.EpsilonGreedy);
@@ -996,6 +1026,48 @@ public class SimulationController : MonoBehaviour
                 BoostAgentsAt(mouseCell, boostRadius, boostGrant);
             }
             GUI.enabled = true;
+
+            // --- Help overlay (toggle with H) ---
+            const int helpW = 360;
+            const int helpH = 260;
+
+            // Ensure styles are initialized
+            EnsureHelpStyles();
+
+            if (GUI.Button(new Rect(Screen.width - 80, 10, 70, 24), showHelp ? "Help ✓" : "Help"))
+                showHelp = !showHelp;
+
+            if (showHelp)
+            {
+                // panel background
+                var r = new Rect(Screen.width - helpW - 10, 40, helpW, helpH);
+                GUI.Box(r, GUIContent.none);
+
+                float lx = r.x + 10, ly = r.y + 8, lh = 18;
+
+                // Controls & Hotkeys section
+                GUI.Label(new Rect(lx, ly, helpW - 20, lh), "Controls & Hotkeys", helpTitleStyle); ly += lh + 4;
+                GUI.Label(new Rect(lx, ly, helpW - 20, lh), "Space – Pause/Resume", helpLabelStyle); ly += lh;
+                GUI.Label(new Rect(lx, ly, helpW - 20, lh), "Step – Advance one tick (when paused)", helpLabelStyle); ly += lh;
+                GUI.Label(new Rect(lx, ly, helpW - 20, lh), "R – Reset agents (deterministic for seed)", helpLabelStyle); ly += lh;
+                GUI.Label(new Rect(lx, ly, helpW - 20, lh), "F – Frame camera to grid", helpLabelStyle); ly += lh;
+                GUI.Label(new Rect(lx, ly, helpW - 20, lh), "L – Toggle logging (OFF/armed/ON)", helpLabelStyle); ly += lh;
+                GUI.Label(new Rect(lx, ly, helpW - 20, lh), "N – New Log (fresh file next tick)", helpLabelStyle); ly += lh;
+                GUI.Label(new Rect(lx, ly, helpW - 20, lh), "D – Drought @Mouse (deplete area)", helpLabelStyle); ly += lh;
+                GUI.Label(new Rect(lx, ly, helpW - 20, lh), "B – Boost Agents @Mouse (grant energy)", helpLabelStyle); ly += lh;
+                GUI.Label(new Rect(lx, ly, helpW - 20, lh), "H – Toggle this help overlay", helpLabelStyle); ly += lh;
+                GUI.Label(new Rect(lx, ly, helpW - 20, lh), "1/2/3/4 – Policy: ε-Greedy / Linger / ObsGreedy / ML-Agents", helpLabelStyle); ly += lh + 8;
+
+                // Charts & Legend section
+                GUI.Label(new Rect(lx, ly, helpW - 20, lh), "Charts & Legend", helpTitleStyle); ly += lh + 4;
+                GUI.Label(new Rect(lx, ly, helpW - 20, lh), "Top: Population bars (windowed max)", helpLabelStyle); ly += lh;
+                GUI.Label(new Rect(lx, ly, helpW - 20, lh), "Mini: Births (white), Deaths (gray), Mean energy (cyan)", helpMiniStyle); ly += lh + 8;
+
+                // Tips section
+                GUI.Label(new Rect(lx, ly, helpW - 20, lh), "Tips", helpTitleStyle); ly += lh + 4;
+                GUI.Label(new Rect(lx, ly, helpW - 20, lh), "Start paused; tweak policy & presets, then Resume/Step", helpLabelStyle); ly += lh;
+                GUI.Label(new Rect(lx, ly, helpW - 20, lh), "Use Snapshot for experiment notes; New Log to segment runs", helpLabelStyle);
+            }
         }
     }
 }
