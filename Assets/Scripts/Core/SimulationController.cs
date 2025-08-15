@@ -61,6 +61,8 @@ public class SimulationController : MonoBehaviour
     private int tick;
     private RunLogger logger;
     private string logPathShown;
+    private bool loggingStarted;
+    private bool loggingEnabled; // runtime switch; controls whether we log at all
 
     // Pop history & chart
     private readonly List<int> popHistory = new();
@@ -84,18 +86,16 @@ public class SimulationController : MonoBehaviour
         rng = new System.Random(grid.config.seed);
         SpawnAgents();
 
-        // Logging
-        if (enableCsvLogging)
-        {
+        // Logging: instantiate holder only; don't start until first tick
+        if (enableCsvLogging && logger == null)
             logger = new RunLogger();
-            logger.StartNew("run", grid.config.seed, grid.config, logFlushEvery);
-            logPathShown = logger.LogPath;
-        }
+        loggingEnabled = enableCsvLogging;  // runtime toggle follows the inspector default
+        loggingStarted = false;
 
         // Init counters/series
         tick = 0;
         popHistory.Clear();
-        RecordPopulation(); // initial sample
+        // (no RecordPopulation here; we start after the first tick)
 
         paused = startPaused;
     }
@@ -208,6 +208,14 @@ public class SimulationController : MonoBehaviour
         env?.TickRegen();
 
         // 6) Bookkeeping
+        if (loggingEnabled && !loggingStarted)
+        {
+            if (logger == null) logger = new RunLogger();
+            logger.StartNew("run", grid.config.seed, grid.config, logFlushEvery);
+            logPathShown = logger.LogPath;
+            loggingStarted = true;
+        }
+
         tick++;
         RecordPopulation(); // sample + CSV + chart mark dirty
 
@@ -229,6 +237,13 @@ public class SimulationController : MonoBehaviour
     }
 
     // ---------- Helpers ----------
+    private void SetPolicyAndReset(PolicyType p)
+    {
+        if (policy == p) return;
+        policy = p;
+        ResetAgents(); // respawns with the new policy selection
+    }
+
     private Vector2Int ChooseBirthCell(Vector2Int center)
     {
         Vector2Int[] options = new[]
@@ -285,7 +300,7 @@ public class SimulationController : MonoBehaviour
         if (popHistory.Count > chartWidth) popHistory.RemoveAt(0);
         chartDirty = true;
 
-        if (enableCsvLogging) logger?.LogTick(tick, agents.Count);
+        if (loggingEnabled && loggingStarted) logger?.LogTick(tick, agents.Count);
     }
 
     // ---------- Spawning ----------
@@ -363,14 +378,13 @@ public class SimulationController : MonoBehaviour
         popHistory.Clear();
         chartDirty = true;
 
-        // Optionally start a fresh CSV
-        if (enableCsvLogging && newLogOnReset)
-        {
-            logger?.StartNew("run", grid.config.seed, grid.config, logFlushEvery);
-            logPathShown = logger.LogPath;
-        }
+        // Logging will start on first tick after reset if enabled
+        loggingStarted = false;
+        if (enableCsvLogging && logger == null)
+            logger = new RunLogger();
+        loggingEnabled = enableCsvLogging; // keep inspector as the default after reset
 
-        RecordPopulation(); // log initial state
+        // (no StartNew and no RecordPopulation here)
     }
 
     // ---------- Camera helper ----------
@@ -475,6 +489,23 @@ public class SimulationController : MonoBehaviour
         if (GUI.Button(new Rect(280, 40, 80, 24), "Frame"))
             FrameCamera();
 
+        // --- Policy row ---
+        float bx = 370f, by = 40f, bw = 110f, bh = 24f;
+        if (GUI.Button(new Rect(bx, by, bw, bh), policy == PolicyType.EpsilonGreedy ? "ε-Greedy ✓" : "ε-Greedy"))
+            SetPolicyAndReset(PolicyType.EpsilonGreedy);
+        bx += bw + 6f;
+
+        if (GUI.Button(new Rect(bx, by, bw, bh), policy == PolicyType.RichnessLinger ? "Linger ✓" : "Linger"))
+            SetPolicyAndReset(PolicyType.RichnessLinger);
+        bx += bw + 6f;
+
+        if (GUI.Button(new Rect(bx, by, bw, bh), policy == PolicyType.ObservationGreedy ? "ObsGreedy ✓" : "ObsGreedy"))
+            SetPolicyAndReset(PolicyType.ObservationGreedy);
+        bx += bw + 6f;
+
+        if (GUI.Button(new Rect(bx, by, bw, bh), policy == PolicyType.MLAgents ? "ML-Agents ✓" : "ML-Agents"))
+            SetPolicyAndReset(PolicyType.MLAgents);
+
         // Readouts
         if (showReadout && env != null)
         {
@@ -503,10 +534,28 @@ public class SimulationController : MonoBehaviour
                 GUI.Label(new Rect(10, 160, 300, 18), $"Population (window max: {lastWindowMax})");
                 GUI.Box(new Rect(10, 174, chartWidth + 8, chartHeight + 8), GUIContent.none);
                 GUI.DrawTexture(new Rect(14, 178, chartWidth, chartHeight), chartTex);
-                if (enableCsvLogging && !string.IsNullOrEmpty(logPathShown))
+                if (enableCsvLogging)
                 {
-                    GUI.Label(new Rect(14, 178 + chartHeight + 6, 760, 20),
-                        $"Logging → {System.IO.Path.GetFileName(logPathShown)}  (…/persistentDataPath/Logs)");
+                    // Logging toggle button
+                    string logLabel = (loggingEnabled && loggingStarted) ? "Logging: ON" :
+                                    (loggingEnabled ? "Logging: armed" : "Logging: OFF");
+                    if (GUI.Button(new Rect(14, 178 + chartHeight + 6, 120, 24), logLabel))
+                    {
+                        loggingEnabled = !loggingEnabled;
+                        if (!loggingEnabled && loggingStarted)
+                        {
+                            logger?.Close();
+                            loggingStarted = false;
+                            logPathShown = null;
+                        }
+                    }
+
+                    // Log file path display
+                    if (!string.IsNullOrEmpty(logPathShown))
+                    {
+                        GUI.Label(new Rect(140, 178 + chartHeight + 11, 760, 20),
+                            $"→ {System.IO.Path.GetFileName(logPathShown)}  (…/persistentDataPath/Logs)");
+                    }
                 }
             }
         }
