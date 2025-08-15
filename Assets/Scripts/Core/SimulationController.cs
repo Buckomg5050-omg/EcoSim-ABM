@@ -1,6 +1,8 @@
 // Assets/Scripts/Core/SimulationController.cs
+using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 
 public class SimulationController : MonoBehaviour
@@ -71,10 +73,11 @@ public class SimulationController : MonoBehaviour
     private Color32[] chartPixels;
     private bool chartDirty;
     private int lastWindowMax = 1;
+    private string lastSnapshotPath;
 
     private void Awake()
     {
-        grid = Object.FindFirstObjectByType<GridManager>();
+        grid = UnityEngine.Object.FindFirstObjectByType<GridManager>();
         if (grid == null || grid.config == null)
         {
             Debug.LogError("SimulationController: add a GridManager in the scene and assign a GridConfig.");
@@ -82,7 +85,7 @@ public class SimulationController : MonoBehaviour
             return;
         }
 
-        env = Object.FindFirstObjectByType<EnvironmentGrid>();
+        env = UnityEngine.Object.FindFirstObjectByType<EnvironmentGrid>();
 
         rng = new System.Random(grid.config.seed);
         SpawnAgents();
@@ -422,6 +425,91 @@ public class SimulationController : MonoBehaviour
         cam.transform.LookAt(center);
     }
 
+    [Serializable] private class GridCfg { public int width, height; public float cellSize; public int seed; }
+    [Serializable] private class EnvCfg {
+        public float maxEnergyPerCell, initialFill, noiseScale, noisePersistence, regenPerTick;
+        public int noiseOctaves;
+    }
+    [Serializable] private class ReproCfg { public bool enabled; public float threshold, offspringFraction; public int maxAgents; }
+    [Serializable] private class AgentParams {
+        public float maxEnergy, startEnergy, metabolismPerTick, harvestPerStep;
+    }
+    [Serializable] private class Snapshot {
+        public string company, product, unityVersion, policy, behaviorName, logPath;
+        public string timestamp; public long unixTime;
+        public int episode, tick, agentCount, gridSeed;
+        public GridCfg grid; public EnvCfg env; public ReproCfg reproduction; public AgentParams agent;
+    }
+
+    private Snapshot BuildSnapshot()
+    {
+        var snap = new Snapshot {
+            company = Application.companyName,
+            product = Application.productName,
+            unityVersion = Application.unityVersion,
+            timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+            unixTime = DateTimeOffset.Now.ToUnixTimeSeconds(),
+            episode = episodeIndex,
+            tick = tick,
+            agentCount = agents.Count,
+            policy = policy.ToString(),
+            behaviorName = null,
+            logPath = logPathShown,
+            gridSeed = grid?.config?.seed ?? 0,
+            grid = new GridCfg {
+                width = grid?.config?.width ?? 0,
+                height = grid?.config?.height ?? 0,
+                cellSize = grid?.config?.cellSize ?? 1f,
+                seed = grid?.config?.seed ?? 0
+            },
+            env = env ? new EnvCfg {
+                maxEnergyPerCell = env.maxEnergyPerCell,
+                initialFill = env.initialFill,
+                noiseScale = env.noiseScale,
+                noiseOctaves = env.noiseOctaves,
+                noisePersistence = env.noisePersistence,
+                regenPerTick = env.regenPerTick
+            } : null,
+            reproduction = new ReproCfg {
+                enabled = enableReproduction,
+                threshold = reproduceThreshold,
+                offspringFraction = offspringEnergyFraction,
+                maxAgents = maxAgents
+            },
+            agent = (agents.Count > 0) ? new AgentParams {
+                maxEnergy = agents[0].maxEnergy,
+                startEnergy = agents[0].Energy, // current internal energy
+                metabolismPerTick = agents[0].metabolismPerTick,
+                harvestPerStep = agents[0].GetComponent<RandomWalkerAgent>()?.harvestPerStep ?? 0f
+            } : null
+        };
+
+        // If ML-Agents policy is active, include BehaviorParameters name when present
+#if MLAGENTS_PRESENT
+        if (policy == PolicyType.MLAgents && agents.Count > 0)
+        {
+            var bp = agents[0].GetComponent<Unity.MLAgents.Policies.BehaviorParameters>();
+            if (bp != null) snap.behaviorName = bp.BehaviorName;
+        }
+#endif
+
+        return snap;
+    }
+
+    private void SaveSnapshot()
+    {
+        var snap = BuildSnapshot();
+        var json = JsonUtility.ToJson(snap, prettyPrint: true);
+
+        string dir = Path.Combine(Application.persistentDataPath, "Exports");
+        Directory.CreateDirectory(dir);
+        string ts = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        string fname = $"snapshot_{ts}_seed{(grid?.config?.seed ?? 0)}.json";
+        lastSnapshotPath = Path.Combine(dir, fname);
+        File.WriteAllText(lastSnapshotPath, json);
+        Debug.Log($"Snapshot saved: {lastSnapshotPath}");
+    }
+
     // Golden-ratio hue spacing
     private static Color ColorFromIndex(int i)
     {
@@ -575,6 +663,17 @@ public class SimulationController : MonoBehaviour
                         // If logging is on, we'll close now and reopen next tick.
                         // If logging is OFF/armed, we'll just force the next file to be new.
                         newLogArmed = true;
+                    }
+
+                    // Snapshot button (always visible)
+                    if (GUI.Button(new Rect(250, 154 + chartHeight + 28, 100, 24), "Snapshot"))
+                    {
+                        SaveSnapshot();
+                    }
+                    if (!string.IsNullOrEmpty(lastSnapshotPath))
+                    {
+                        GUI.Label(new Rect(356, 154 + chartHeight + 32, 520, 20),
+                            $"Saved → {Path.GetFileName(lastSnapshotPath)}  (…/persistentDataPath/Exports)");
                     }
                 }
             }
