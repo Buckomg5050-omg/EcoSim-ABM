@@ -27,6 +27,7 @@ public class SimulationController : MonoBehaviour
     public bool showPopChart = true;
     [Range(60, 1024)] public int chartWidth = 320;
     [Range(40, 256)] public int chartHeight = 80;
+    [Range(16, 128)] public int birthsDeathsChartHeight = 36;
 
     // Enum (no Header attribute on enums)
     public enum PolicyType { EpsilonGreedy, RichnessLinger, ObservationGreedy, MLAgents }
@@ -78,9 +79,14 @@ public class SimulationController : MonoBehaviour
 
     // Pop history & chart
     private readonly List<int> popHistory = new();
+    private readonly List<int> birthsHistory = new();
+    private readonly List<int> deathsHistory = new();
     private Texture2D chartTex;
+    private Texture2D chartTexBD;
     private Color32[] chartPixels;
+    private Color32[] chartPixelsBD;
     private bool chartDirty;
+    private bool bdChartDirty;
     private int lastWindowMax = 1;
     private string lastSnapshotPath;
 
@@ -111,6 +117,8 @@ public class SimulationController : MonoBehaviour
         // Init counters/series
         tick = 0;
         popHistory.Clear();
+        birthsHistory.Clear();
+        deathsHistory.Clear();
         // (no RecordPopulation here; we start after the first tick)
 
         paused = startPaused;
@@ -153,7 +161,10 @@ public class SimulationController : MonoBehaviour
 
     private void TickOnce()
     {
-        // Reset per-step rewards
+        // Reset per-step rewards and counters
+        int birthsThisTick = 0;
+        int deathsThisTick = 0;
+        
         for (int i = 0; i < agents.Count; i++)
             agents[i].ResetStepReward();
 
@@ -184,6 +195,7 @@ public class SimulationController : MonoBehaviour
             if (agents[i].IsDead)
             {
                 agents[i].AddReward(-deathPenalty);
+                deathsThisTick++;
                 var go = agents[i].gameObject;
                 agents.RemoveAt(i);
                 if (go != null) Destroy(go);
@@ -216,7 +228,8 @@ public class SimulationController : MonoBehaviour
                 }
             }
 
-            for (int b = 0; b < births.Count; b++)
+            birthsThisTick = births.Count;
+            for (int b = 0; b < birthsThisTick; b++)
                 SpawnOneAgent(births[b].cell, births[b].energy);
         }
 
@@ -244,7 +257,7 @@ public class SimulationController : MonoBehaviour
         }
 
         tick++;
-        RecordPopulation(); // sample + CSV + chart mark dirty
+        RecordPopulation(birthsThisTick, deathsThisTick); // sample + CSV + chart mark dirty
 
         // 7) Episode termination checks
         if (enableEpisodes)
@@ -320,16 +333,6 @@ public class SimulationController : MonoBehaviour
         return false;
     }
 
-    private void RecordPopulation()
-    {
-        // history capped to chartWidth samples
-        popHistory.Add(agents.Count);
-        if (popHistory.Count > chartWidth) popHistory.RemoveAt(0);
-        chartDirty = true;
-
-        if (loggingEnabled && loggingStarted) logger?.LogTick(tick, agents.Count);
-    }
-
     // ---------- Spawning ----------
     private void SpawnAgents()
     {
@@ -403,7 +406,10 @@ public class SimulationController : MonoBehaviour
         // Reset counters & chart
         tick = 0;
         popHistory.Clear();
+        birthsHistory.Clear();
+        deathsHistory.Clear();
         chartDirty = true;
+        bdChartDirty = true;
 
         // Reset logging state but keep user's toggle choice
         loggingStarted = false;
@@ -583,6 +589,59 @@ public class SimulationController : MonoBehaviour
         chartDirty = false;
     }
 
+    private void EnsureBDTexture()
+    {
+        if (chartTexBD != null && chartTexBD.width == chartWidth && chartTexBD.height == birthsDeathsChartHeight)
+            return;
+        chartTexBD = new Texture2D(chartWidth, birthsDeathsChartHeight, TextureFormat.RGBA32, false);
+        chartTexBD.wrapMode = TextureWrapMode.Clamp;
+        chartPixelsBD = new Color32[chartWidth * birthsDeathsChartHeight];
+        bdChartDirty = true;
+    }
+
+    private void RebuildBDChartTexture()
+    {
+        EnsureBDTexture();
+
+        // background
+        int total = chartPixelsBD.Length;
+        for (int i = 0; i < total; i++) chartPixelsBD[i] = new Color32(0, 0, 0, 160);
+
+        int n = Mathf.Min(Mathf.Min(birthsHistory.Count, deathsHistory.Count), chartWidth);
+        if (n >= 2)
+        {
+            // Find max window value for scale
+            int maxVal = 1;
+            for (int i = 0; i < n; i++)
+            {
+                if (birthsHistory[i] > maxVal) maxVal = birthsHistory[i];
+                if (deathsHistory[i] > maxVal) maxVal = deathsHistory[i];
+            }
+            // Plot resampled lines (point-per-column). Births = white, Deaths = light gray.
+            for (int x = 0; x < chartWidth; x++)
+            {
+                int idx = Mathf.RoundToInt(Mathf.Lerp(0, n - 1, (float)x / (chartWidth - 1)));
+                int bVal = Mathf.Clamp(Mathf.RoundToInt((birthsHistory[idx] / (float)maxVal) * (birthsDeathsChartHeight - 1)), 0, birthsDeathsChartHeight - 1);
+                int dVal = Mathf.Clamp(Mathf.RoundToInt((deathsHistory[idx] / (float)maxVal) * (birthsDeathsChartHeight - 1)), 0, birthsDeathsChartHeight - 1);
+
+                int yB = birthsDeathsChartHeight - 1 - bVal;
+                int yD = birthsDeathsChartHeight - 1 - dVal;
+
+                // Births point
+                int iiB = yB * chartWidth + x;
+                chartPixelsBD[iiB] = new Color32(255, 255, 255, 255);
+
+                // Deaths point (don't overwrite white if same pixel)
+                int iiD = yD * chartWidth + x;
+                if (iiD != iiB) chartPixelsBD[iiD] = new Color32(180, 180, 180, 255);
+            }
+        }
+
+        chartTexBD.SetPixels32(chartPixelsBD);
+        chartTexBD.Apply(false, false);
+        bdChartDirty = false;
+    }
+
     private void ApplyPreset(SimPreset p)
     {
         if (p == null) return;
@@ -641,6 +700,27 @@ public class SimulationController : MonoBehaviour
             float target = e * keepFraction;     // e.g., keep 25% of current
             float remove = Mathf.Max(0f, e - target);
             if (remove > 0f) env.Harvest(p, remove);
+        }
+    }
+
+    private void RecordPopulation(int birthsThisTick, int deathsThisTick)
+    {
+        // Population history
+        popHistory.Add(agents.Count);
+        if (popHistory.Count > chartWidth) popHistory.RemoveAt(0);
+        chartDirty = true;
+
+        // Births/Deaths history
+        birthsHistory.Add(birthsThisTick);
+        deathsHistory.Add(deathsThisTick);
+        if (birthsHistory.Count > chartWidth) birthsHistory.RemoveAt(0);
+        if (deathsHistory.Count > chartWidth) deathsHistory.RemoveAt(0);
+        bdChartDirty = true;
+
+        // Log to CSV if enabled and logging has started
+        if (loggingEnabled && loggingStarted)
+        {
+            logger?.LogTick(tick, agents.Count);
         }
     }
 
@@ -745,15 +825,28 @@ public class SimulationController : MonoBehaviour
             // Title
             GUI.Label(new Rect(x, yLabel, 300, labelH), $"Population (window max: {lastWindowMax})");
 
-            // Chart frame + texture
+            // --- Main chart ---
             GUI.Box(new Rect(x, yBoxTop, chartWidth + 2 * boxPad, chartHeight + 2 * boxPad), GUIContent.none);
+            if (chartDirty) RebuildChartTexture();
             if (chartTex != null)
             {
                 GUI.DrawTexture(new Rect(x + boxPad, yBoxTop + boxPad, chartWidth, chartHeight), chartTex);
             }
 
-            // Controls row under the chart
-            int yCtrl = yBoxTop + (chartHeight + 2 * boxPad) + controlsGapY;
+            // --- Births/Deaths mini chart ---
+            int yBDTop = yBoxTop + (chartHeight + 2 * boxPad) + controlsGapY;
+            GUI.Box(new Rect(x, yBDTop, chartWidth + 2 * boxPad, birthsDeathsChartHeight + 2 * boxPad), GUIContent.none);
+            if (bdChartDirty) RebuildBDChartTexture();
+            if (chartTexBD != null)
+            {
+                GUI.DrawTexture(new Rect(x + boxPad, yBDTop + boxPad, chartWidth, birthsDeathsChartHeight), chartTexBD);
+            }
+
+            // legend (small)
+            GUI.Label(new Rect(x + 6, yBDTop - 16, 220, 14), "Births (white)   Deaths (gray)");
+
+            // --- Controls row ---
+            int yCtrl = yBDTop + (birthsDeathsChartHeight + 2 * boxPad) + controlsGapY;
 
             string logLabel = (loggingEnabled && loggingStarted) ? "Logging: ON"
                             : (loggingEnabled ? "Logging: armed" : "Logging: OFF");
