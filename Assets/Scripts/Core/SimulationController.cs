@@ -63,6 +63,7 @@ public class SimulationController : MonoBehaviour
     private string logPathShown;
     private bool loggingStarted;
     private bool loggingEnabled; // runtime switch; controls whether we log at all
+    private bool newLogArmed; // when true, roll over to a new CSV on the next tick
 
     // Pop history & chart
     private readonly List<int> popHistory = new();
@@ -207,13 +208,24 @@ public class SimulationController : MonoBehaviour
         // 5) Environment regrows a bit each tick
         env?.TickRegen();
 
-        // 6) Bookkeeping
-        if (loggingEnabled && !loggingStarted)
+        // 6) Bookkeeping (logging with optional rollover)
+        if (loggingEnabled)
         {
-            if (logger == null) logger = new RunLogger();
-            logger.StartNew("run", grid.config.seed, grid.config, logFlushEvery);
-            logPathShown = logger.LogPath;
-            loggingStarted = true;
+            // If a rollover was requested and we were logging, close so a fresh one starts below
+            if (newLogArmed && loggingStarted)
+            {
+                logger?.Close();
+                loggingStarted = false;
+            }
+
+            if (!loggingStarted)
+            {
+                if (logger == null) logger = new RunLogger();
+                logger.StartNew("run", grid.config.seed, grid.config, logFlushEvery);
+                logPathShown = logger.LogPath;
+                loggingStarted = true;
+                newLogArmed = false; // consume the arm
+            }
         }
 
         tick++;
@@ -555,6 +567,14 @@ public class SimulationController : MonoBehaviour
                     {
                         GUI.Label(new Rect(140, 178 + chartHeight + 11, 760, 20),
                             $"→ {System.IO.Path.GetFileName(logPathShown)}  (…/persistentDataPath/Logs)");
+                    }
+
+                    // "New Log" button (only show when logging is enabled)
+                    if (loggingEnabled && GUI.Button(new Rect(140, 154 + chartHeight + 28, 100, 24), "New Log"))
+                    {
+                        // If logging is on, we'll close now and reopen next tick.
+                        // If logging is OFF/armed, we'll just force the next file to be new.
+                        newLogArmed = true;
                     }
                 }
             }
