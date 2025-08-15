@@ -81,6 +81,7 @@ public class SimulationController : MonoBehaviour
     private readonly List<int> popHistory = new();
     private readonly List<int> birthsHistory = new();
     private readonly List<int> deathsHistory = new();
+    private readonly List<float> meanEnergyHistory = new();
     private Texture2D chartTex;
     private Texture2D chartTexBD;
     private Color32[] chartPixels;
@@ -408,6 +409,7 @@ public class SimulationController : MonoBehaviour
         popHistory.Clear();
         birthsHistory.Clear();
         deathsHistory.Clear();
+        meanEnergyHistory.Clear();
         chartDirty = true;
         bdChartDirty = true;
 
@@ -610,30 +612,41 @@ public class SimulationController : MonoBehaviour
         int n = Mathf.Min(Mathf.Min(birthsHistory.Count, deathsHistory.Count), chartWidth);
         if (n >= 2)
         {
-            // Find max window value for scale
+            // Find max window value for scale (for births/deaths only)
             int maxVal = 1;
             for (int i = 0; i < n; i++)
             {
                 if (birthsHistory[i] > maxVal) maxVal = birthsHistory[i];
                 if (deathsHistory[i] > maxVal) maxVal = deathsHistory[i];
             }
-            // Plot resampled lines (point-per-column). Births = white, Deaths = light gray.
+
+            // Plot resampled lines (point-per-column)
             for (int x = 0; x < chartWidth; x++)
             {
                 int idx = Mathf.RoundToInt(Mathf.Lerp(0, n - 1, (float)x / (chartWidth - 1)));
+                
+                // Births (white)
                 int bVal = Mathf.Clamp(Mathf.RoundToInt((birthsHistory[idx] / (float)maxVal) * (birthsDeathsChartHeight - 1)), 0, birthsDeathsChartHeight - 1);
-                int dVal = Mathf.Clamp(Mathf.RoundToInt((deathsHistory[idx] / (float)maxVal) * (birthsDeathsChartHeight - 1)), 0, birthsDeathsChartHeight - 1);
-
                 int yB = birthsDeathsChartHeight - 1 - bVal;
-                int yD = birthsDeathsChartHeight - 1 - dVal;
-
-                // Births point
-                int iiB = yB * chartWidth + x;
+                int iiB = yB * chartWidth + x; 
                 chartPixelsBD[iiB] = new Color32(255, 255, 255, 255);
 
-                // Deaths point (don't overwrite white if same pixel)
-                int iiD = yD * chartWidth + x;
+                // Deaths (gray) - don't overwrite white if same pixel
+                int dVal = Mathf.Clamp(Mathf.RoundToInt((deathsHistory[idx] / (float)maxVal) * (birthsDeathsChartHeight - 1)), 0, birthsDeathsChartHeight - 1);
+                int yD = birthsDeathsChartHeight - 1 - dVal;
+                int iiD = yD * chartWidth + x; 
                 if (iiD != iiB) chartPixelsBD[iiD] = new Color32(180, 180, 180, 255);
+
+                // Mean energy (cyan) - uses 0..1 directly
+                if (idx < meanEnergyHistory.Count)
+                {
+                    float m = meanEnergyHistory[idx];
+                    int mVal = Mathf.Clamp(Mathf.RoundToInt(m * (birthsDeathsChartHeight - 1)), 0, birthsDeathsChartHeight - 1);
+                    int yM = birthsDeathsChartHeight - 1 - mVal;
+                    int iiM = yM * chartWidth + x;
+                    // Draw cyan; if collides with births/deaths, cyan will overwrite for visibility
+                    chartPixelsBD[iiM] = new Color32(0, 200, 255, 255);
+                }
             }
         }
 
@@ -715,6 +728,23 @@ public class SimulationController : MonoBehaviour
         deathsHistory.Add(deathsThisTick);
         if (birthsHistory.Count > chartWidth) birthsHistory.RemoveAt(0);
         if (deathsHistory.Count > chartWidth) deathsHistory.RemoveAt(0);
+
+        // Mean energy (normalized by each agent's maxEnergy)
+        float mean = 0f;
+        if (agents.Count > 0)
+        {
+            float sum = 0f;
+            for (int i = 0; i < agents.Count; i++)
+            {
+                float denom = Mathf.Max(0.0001f, agents[i].maxEnergy);
+                sum += Mathf.Clamp01(agents[i].Energy / denom);
+            }
+            mean = sum / agents.Count; // 0..1
+        }
+        meanEnergyHistory.Add(mean);
+        if (meanEnergyHistory.Count > chartWidth) meanEnergyHistory.RemoveAt(0);
+
+        // Mark mini-chart dirty
         bdChartDirty = true;
 
         // Log to CSV if enabled and logging has started
@@ -843,7 +873,8 @@ public class SimulationController : MonoBehaviour
             }
 
             // legend (small)
-            GUI.Label(new Rect(x + 6, yBDTop - 16, 220, 14), "Births (white)   Deaths (gray)");
+            GUI.Label(new Rect(x + 6, yBDTop - 16, 380, 14), 
+                     "Births (white)   Deaths (gray)   Mean energy (cyan)");
 
             // --- Controls row ---
             int yCtrl = yBDTop + (birthsDeathsChartHeight + 2 * boxPad) + controlsGapY;
