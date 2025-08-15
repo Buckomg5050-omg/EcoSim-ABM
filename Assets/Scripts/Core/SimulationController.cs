@@ -19,7 +19,7 @@ public class SimulationController : MonoBehaviour
     [Min(1)] public int maxAgents = 200;
 
     [Header("Logging")]
-    public bool enableCsvLogging = true;
+    public bool enableCsvLogging = false;   // Start with logging OFF by default
     public bool newLogOnReset = true;
     [Min(1)] public int logFlushEvery = 60;
 
@@ -90,10 +90,9 @@ public class SimulationController : MonoBehaviour
         rng = new System.Random(grid.config.seed);
         SpawnAgents();
 
-        // Logging: instantiate holder only; don't start until first tick
-        if (enableCsvLogging && logger == null)
-            logger = new RunLogger();
-        loggingEnabled = enableCsvLogging;  // runtime toggle follows the inspector default
+        // Logging: instantiate holder only; start OFF by default
+        if (logger == null) logger = new RunLogger();
+        loggingEnabled = false;   // Start with logging OFF by default
         loggingStarted = false;
 
         // Init counters/series
@@ -393,11 +392,11 @@ public class SimulationController : MonoBehaviour
         popHistory.Clear();
         chartDirty = true;
 
-        // Logging will start on first tick after reset if enabled
+        // Reset logging state but keep user's toggle choice
         loggingStarted = false;
-        if (enableCsvLogging && logger == null)
+        if (logger == null) 
             logger = new RunLogger();
-        loggingEnabled = enableCsvLogging; // keep inspector as the default after reset
+        // Note: loggingEnabled is preserved to maintain user's toggle choice
 
         // (no StartNew and no RecordPopulation here)
     }
@@ -625,57 +624,71 @@ public class SimulationController : MonoBehaviour
             }
         }
 
-        // Population chart + log path
+        // --- Population chart (bottom-left) + logging controls ---
         if (showPopChart)
         {
             if (chartDirty) RebuildChartTexture();
+
+            // Layout constants
+            const int pad = 10;           // outer margin from screen edges
+            const int boxPad = 4;         // padding inside the chart frame
+            const int labelH = 18;        // label height above the chart
+            const int controlsH = 24;     // height of the controls row under the chart
+            const int controlsGapY = 2;   // small gap between chart and controls
+            const int gap = 6;            // gap between buttons
+
+            // Anchor to bottom-left
+            int x = pad;
+            // reserve space: chart frame + controls row at the very bottom
+            int yBoxTop = Screen.height - pad - (chartHeight + 2 * boxPad) - controlsH - controlsGapY;
+            int yLabel  = yBoxTop - (labelH + 2);
+
+            // Title
+            GUI.Label(new Rect(x, yLabel, 300, labelH), $"Population (window max: {lastWindowMax})");
+
+            // Chart frame + texture
+            GUI.Box(new Rect(x, yBoxTop, chartWidth + 2 * boxPad, chartHeight + 2 * boxPad), GUIContent.none);
             if (chartTex != null)
             {
-                GUI.Label(new Rect(10, 160, 300, 18), $"Population (window max: {lastWindowMax})");
-                GUI.Box(new Rect(10, 174, chartWidth + 8, chartHeight + 8), GUIContent.none);
-                GUI.DrawTexture(new Rect(14, 178, chartWidth, chartHeight), chartTex);
-                if (enableCsvLogging)
+                GUI.DrawTexture(new Rect(x + boxPad, yBoxTop + boxPad, chartWidth, chartHeight), chartTex);
+            }
+
+            // Controls row under the chart
+            int yCtrl = yBoxTop + (chartHeight + 2 * boxPad) + controlsGapY;
+
+            string logLabel = (loggingEnabled && loggingStarted) ? "Logging: ON"
+                            : (loggingEnabled ? "Logging: armed" : "Logging: OFF");
+
+            // Logging toggle button
+            if (GUI.Button(new Rect(x, yCtrl, 120, controlsH), logLabel))
+            {
+                loggingEnabled = !loggingEnabled;
+                if (!loggingEnabled && loggingStarted)
                 {
-                    // Logging toggle button
-                    string logLabel = (loggingEnabled && loggingStarted) ? "Logging: ON" :
-                                    (loggingEnabled ? "Logging: armed" : "Logging: OFF");
-                    if (GUI.Button(new Rect(14, 178 + chartHeight + 6, 120, 24), logLabel))
-                    {
-                        loggingEnabled = !loggingEnabled;
-                        if (!loggingEnabled && loggingStarted)
-                        {
-                            logger?.Close();
-                            loggingStarted = false;
-                            logPathShown = null;
-                        }
-                    }
-
-                    // Log file path display
-                    if (!string.IsNullOrEmpty(logPathShown))
-                    {
-                        GUI.Label(new Rect(140, 178 + chartHeight + 11, 760, 20),
-                            $"→ {System.IO.Path.GetFileName(logPathShown)}  (…/persistentDataPath/Logs)");
-                    }
-
-                    // "New Log" button (only show when logging is enabled)
-                    if (loggingEnabled && GUI.Button(new Rect(140, 154 + chartHeight + 28, 100, 24), "New Log"))
-                    {
-                        // If logging is on, we'll close now and reopen next tick.
-                        // If logging is OFF/armed, we'll just force the next file to be new.
-                        newLogArmed = true;
-                    }
-
-                    // Snapshot button (always visible)
-                    if (GUI.Button(new Rect(250, 154 + chartHeight + 28, 100, 24), "Snapshot"))
-                    {
-                        SaveSnapshot();
-                    }
-                    if (!string.IsNullOrEmpty(lastSnapshotPath))
-                    {
-                        GUI.Label(new Rect(356, 154 + chartHeight + 32, 520, 20),
-                            $"Saved → {Path.GetFileName(lastSnapshotPath)}  (…/persistentDataPath/Exports)");
-                    }
+                    logger?.Close();
+                    loggingStarted = false;
+                    logPathShown = null;
                 }
+            }
+
+            // "New Log" rollover
+            if (GUI.Button(new Rect(x + 120 + gap, yCtrl, 90, controlsH), "New Log"))
+            {
+                newLogArmed = true;
+            }
+
+            // Snapshot export
+            if (GUI.Button(new Rect(x + 120 + gap + 90 + gap, yCtrl, 100, controlsH), "Snapshot"))
+            {
+                SaveSnapshot();
+            }
+
+            // Log file name (if any)
+            if (!string.IsNullOrEmpty(logPathShown))
+            {
+                string fname = System.IO.Path.GetFileName(logPathShown);
+                GUI.Label(new Rect(x + 120 + gap + 90 + gap + 100 + gap, yCtrl + 4, 520, controlsH),
+                          $"→ {fname}  (…/persistentDataPath/Logs)");
             }
         }
     }
