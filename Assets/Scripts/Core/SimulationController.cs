@@ -8,7 +8,7 @@ public class SimulationController : MonoBehaviour
     [Header("Run Control")]
     [Range(0.5f, 60f)] public float ticksPerSecond = 5f;
     [Min(1)] public int numberOfAgents = 1;
-    public bool startPaused = false;
+    public bool startPaused = true;
 
     [Header("Reproduction")]
     public bool enableReproduction = true;
