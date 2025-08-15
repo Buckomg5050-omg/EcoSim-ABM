@@ -43,6 +43,10 @@ public class SimulationController : MonoBehaviour
     public float metabolismPenaltyScale = 1f; // reward -= scale * metabolismPerTick
     public float deathPenalty = 1f;           // applied once on death
 
+    [Header("Shock (Mouse)")]
+    [Min(1)] public int shockRadius = 5;          // cells
+    [Range(0f, 1f)] public float droughtToFrac = 0.25f; // keep this fraction of current energy (e.g., 25%)
+
     [Header("Episodes")]
     public bool enableEpisodes = true;
     [Min(1)] public int maxTicksPerEpisode = 2000;
@@ -617,6 +621,29 @@ public class SimulationController : MonoBehaviour
         ResetAgents();
     }
 
+    private void ApplyDroughtAt(Vector2Int center, int radius, float keepFraction)
+    {
+        if (env == null || grid == null) return;
+        radius = Mathf.Max(1, radius);
+        keepFraction = Mathf.Clamp01(keepFraction);
+
+        int r2 = radius * radius;
+        for (int dy = -radius; dy <= radius; dy++)
+        for (int dx = -radius; dx <= radius; dx++)
+        {
+            if (dx*dx + dy*dy > r2) continue;
+            var p = new Vector2Int(center.x + dx, center.y + dy);
+            if (!grid.InBounds(p)) continue;
+
+            float e = env.GetEnergy(p);
+            if (e <= 0f) continue;
+
+            float target = e * keepFraction;     // e.g., keep 25% of current
+            float remove = Mathf.Max(0f, e - target);
+            if (remove > 0f) env.Harvest(p, remove);
+        }
+    }
+
     // ---------- Debug UI ----------
     private void OnGUI()
     {
@@ -762,6 +789,15 @@ public class SimulationController : MonoBehaviour
                 GUI.Label(new Rect(x + 120 + gap + 90 + gap + 100 + gap, yCtrl + 4, 520, controlsH),
                           $"→ {fname}  (…/persistentDataPath/Logs)");
             }
+
+            // Drought @ mouse (local depletion)
+            bool canShock = (env != null && hasMouseCell);
+            GUI.enabled = canShock;
+            if (GUI.Button(new Rect(x, yCtrl + controlsH + 4, 200, controlsH), $"Drought @Mouse (R:{shockRadius}, Keep:{droughtToFrac:P0})"))
+            {
+                ApplyDroughtAt(mouseCell, shockRadius, droughtToFrac);
+            }
+            GUI.enabled = true;
         }
     }
 }
